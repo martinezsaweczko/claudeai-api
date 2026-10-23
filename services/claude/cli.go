@@ -10,8 +10,12 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/martinezsaweczko/claudeai-api/config"
@@ -27,16 +31,44 @@ const (
 	scanInitialSize = 64 << 10
 )
 
+// Run outcomes reported in RunInfo.Outcome and the claude.outcome span
+// attribute. The set is bounded so it can be used as a metric label.
+const (
+	OutcomeSuccess        = "success"
+	OutcomeAuth           = "auth"
+	OutcomeRateLimited    = "rate_limited"
+	OutcomeTimeout        = "timeout"
+	OutcomeBusy           = "busy"
+	OutcomeCLIError       = "cli_error"
+	OutcomeNotFound       = "not_found"
+	OutcomeInvalidModel   = "invalid_model"
+	OutcomeInvalidRequest = "invalid_request"
+	OutcomeCanceled       = "canceled"
+)
+
 // RunInfo describes one finished execution. It is delivered to the optional
-// observer so metrics (T7) can be added without touching the run logic.
+// observer (metrics) without the run logic knowing about them.
+//
+// Model is client-controlled (the requested model, or the configured default
+// when none was requested): never use it as a metric label without
+// normalizing it. ResolvedModel is the id the CLI reported, empty when the run
+// failed before any assistant message.
 type RunInfo struct {
-	Model    string
-	Outcome  string // ok, auth, rate_limited, timeout, busy, canceled, not_found, invalid_model, invalid_request, cli_error
-	ExitCode int    // -1 when the process did not run to completion
-	Duration time.Duration
-	Usage    Usage
-	CostUSD  float64
-	Err      error
+	Model         string
+	ResolvedModel string
+	Outcome       string // one of the Outcome* constants
+	ExitCode      int    // -1 when the process did not run to completion
+	Duration      time.Duration
+	QueueWait     time.Duration // time spent waiting for a concurrency slot (0 when free)
+	TTFT          time.Duration // from the start of the call to the first text delta; valid when FirstToken
+	FirstToken    bool
+	Usage         Usage
+	CostUSD       float64
+	NumTurns      int
+	SkillsActive  bool     // the run used a skills snapshot
+	SkillsCommit  string   // short commit of that snapshot, when known
+	SkillsInvoked []string // skills the model used, in order
+	Err           error
 }
 
 // Option customizes a CLIBackend.
@@ -97,6 +129,8 @@ type CLIBackend struct {
 	sem     chan struct{}
 	skills  func() (string, bool)
 
+	inflight atomic.Int64 // runs holding a concurrency slot
+
 	workDir  string
 	dirOnce  sync.Once
 	dirErr   error
@@ -120,6 +154,37 @@ func NewCLIBackend(cfg config.ClaudeConfig, opts ...Option) *CLIBackend {
 	}
 	return b
 }
+
+// InFlight returns the number of CLI runs currently holding a concurrency slot
+// (callers still queued are not counted). It is safe for concurrent use.
+func (b *CLIBackend) InFlight() int64 { return b.inflight.Load() }
+
+// notify delivers info to the observer. A panicking observer must never break
+// a request, so it is recovered and logged without its value.
+func (b *CLIBackend) notify(ctx context.Context, info RunInfo) {
+	if b.observe == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			b.log.ErrorContext(ctx, "claude run observer panicked")
+		}
+	}()
+	b.observe(info)
+}
+
+// skillsCommit derives the short commit from a snapshot directory, which the
+// syncer names after the commit (versions/<sha>). It returns "" for any other
+// shape.
+func skillsCommit(dir string) string {
+	base := filepath.Base(dir)
+	if dir == "" || !commitDirRe.MatchString(base) {
+		return ""
+	}
+	return base[:min(12, len(base))]
+}
+
+var commitDirRe = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
 
 // Close removes the temp working directory created by the backend, if any.
 func (b *CLIBackend) Close() error {
@@ -160,26 +225,63 @@ func (b *CLIBackend) Stream(ctx context.Context, req Request, emit func(Event) e
 	ctx, span := b.tracer.Start(ctx, "claude.run", trace.WithAttributes(attribute.String("claude.model", model)))
 	start := time.Now()
 	exitCode := -1
+	var (
+		parser     *streamParser
+		queueWait  time.Duration
+		ttft       time.Duration
+		firstToken bool
+		skillsDir  string
+		withSkills bool
+	)
 	defer func() {
-		info := RunInfo{Model: model, Outcome: outcomeOf(err), ExitCode: exitCode, Duration: time.Since(start), Usage: res.Usage, CostUSD: res.CostUSD, Err: err}
+		info := RunInfo{
+			Model: model, Outcome: outcomeOf(err), ExitCode: exitCode, Duration: time.Since(start),
+			QueueWait: queueWait, TTFT: ttft, FirstToken: firstToken,
+			Usage: res.Usage, CostUSD: res.CostUSD, NumTurns: res.NumTurns, ResolvedModel: res.Model,
+			SkillsActive: withSkills, Err: err,
+		}
+		if parser != nil {
+			// The parser also knows what failed runs consumed and which model answered.
+			info.ResolvedModel = parser.model
+			if parser.gotResult {
+				info.Usage, info.CostUSD, info.NumTurns = parser.usage, parser.costUSD, parser.numTurns
+			}
+			info.SkillsInvoked = slices.Clone(parser.skills)
+		}
+		if withSkills {
+			info.SkillsCommit = skillsCommit(skillsDir)
+		}
 		span.SetAttributes(
 			attribute.String("claude.outcome", info.Outcome),
 			attribute.Int("claude.exit_code", exitCode),
 			attribute.Int64("claude.duration_ms", info.Duration.Milliseconds()),
-			attribute.Int("claude.tokens.input", res.Usage.InputTokens),
-			attribute.Int("claude.tokens.output", res.Usage.OutputTokens),
-			attribute.Int("claude.tokens.cache_creation", res.Usage.CacheCreationTokens),
-			attribute.Int("claude.tokens.cache_read", res.Usage.CacheReadTokens),
-			attribute.Float64("claude.cost_usd", res.CostUSD),
+			attribute.Int64("claude.queue_wait_ms", queueWait.Milliseconds()),
+			attribute.Int("claude.tokens.input", info.Usage.InputTokens),
+			attribute.Int("claude.tokens.output", info.Usage.OutputTokens),
+			attribute.Int("claude.tokens.cache_creation", info.Usage.CacheCreationTokens),
+			attribute.Int("claude.tokens.cache_read", info.Usage.CacheReadTokens),
+			attribute.Float64("claude.cost_usd", info.CostUSD),
+			attribute.Int("claude.num_turns", info.NumTurns),
+			attribute.Bool("claude.skills.active", info.SkillsActive),
 		)
+		if info.ResolvedModel != "" {
+			span.SetAttributes(attribute.String("claude.model.resolved", info.ResolvedModel))
+		}
+		if firstToken {
+			span.SetAttributes(attribute.Int64("claude.ttft_ms", ttft.Milliseconds()))
+		}
+		if info.SkillsCommit != "" {
+			span.SetAttributes(attribute.String("claude.skills.commit", info.SkillsCommit))
+		}
+		if len(info.SkillsInvoked) > 0 {
+			span.SetAttributes(attribute.StringSlice("claude.skills.invoked", info.SkillsInvoked))
+		}
 		if err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, info.Outcome)
 		}
 		span.End()
-		if b.observe != nil {
-			b.observe(info)
-		}
+		b.notify(ctx, info)
 	}()
 
 	prompt, err := renderPrompt(req.Messages)
@@ -194,17 +296,22 @@ func (b *CLIBackend) Stream(ctx context.Context, req Request, emit func(Event) e
 		system = defaultSystemPrompt
 	}
 
+	queueStart := time.Now()
 	if err := b.acquire(ctx); err != nil {
+		queueWait = time.Since(queueStart)
 		return Result{}, err
 	}
-	defer func() { <-b.sem }()
+	queueWait = time.Since(queueStart)
+	b.inflight.Add(1)
+	defer func() {
+		b.inflight.Add(-1)
+		<-b.sem
+	}()
 
 	runCtx, cancel := context.WithTimeout(ctx, b.cfg.Timeout)
 	defer cancel()
 
 	// The skills snapshot is resolved once and held for the whole run.
-	var skillsDir string
-	var withSkills bool
 	if b.skills != nil {
 		if d, ok := b.skills(); ok && d != "" {
 			skillsDir, withSkills = d, true
@@ -249,7 +356,7 @@ func (b *CLIBackend) Stream(ctx context.Context, req Request, emit func(Event) e
 		close(waited)
 	}()
 
-	parser := newStreamParser()
+	parser = newStreamParser()
 	var emitErr error
 	sc := bufio.NewScanner(pr)
 	sc.Buffer(make([]byte, scanInitialSize), maxLineBytes)
@@ -257,13 +364,17 @@ scan:
 	for sc.Scan() {
 		events, perr := parser.feed(sc.Bytes())
 		if perr != nil {
-			b.log.Debug("ignoring malformed claude stream line")
-			continue
-		}
-		if emit == nil {
+			b.log.DebugContext(ctx, "ignoring malformed claude stream line")
 			continue
 		}
 		for _, e := range events {
+			if e.Type == EventTextDelta && !firstToken {
+				firstToken, ttft = true, time.Since(start)
+				span.AddEvent("first_token", trace.WithAttributes(attribute.Int64("claude.elapsed_ms", ttft.Milliseconds())))
+			}
+			if emit == nil {
+				continue
+			}
 			if emitErr = emit(e); emitErr != nil {
 				cancel() // consumer is gone: stop the process
 				break scan
@@ -336,25 +447,25 @@ func (b *CLIBackend) acquire(ctx context.Context) error {
 func outcomeOf(err error) string {
 	switch {
 	case err == nil:
-		return "ok"
+		return OutcomeSuccess
 	case errors.Is(err, ErrBusy):
-		return "busy"
+		return OutcomeBusy
 	case errors.Is(err, ErrAuth):
-		return "auth"
+		return OutcomeAuth
 	case errors.Is(err, ErrRateLimited):
-		return "rate_limited"
+		return OutcomeRateLimited
 	case errors.Is(err, ErrTimeout):
-		return "timeout"
+		return OutcomeTimeout
 	case errors.Is(err, ErrNotFound):
-		return "not_found"
+		return OutcomeNotFound
 	case errors.Is(err, ErrInvalidModel):
-		return "invalid_model"
+		return OutcomeInvalidModel
 	case errors.Is(err, ErrInvalidRequest):
-		return "invalid_request"
+		return OutcomeInvalidRequest
 	case errors.Is(err, context.Canceled):
-		return "canceled"
+		return OutcomeCanceled
 	}
-	return "cli_error"
+	return OutcomeCLIError
 }
 
 // boundedBuffer keeps the first max bytes written and discards the rest.

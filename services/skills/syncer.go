@@ -262,12 +262,12 @@ func (s *Syncer) Run(ctx context.Context) {
 func (s *Syncer) syncLogged(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
-			s.log.Error("skills sync panicked", "panic", fmt.Sprint(r))
+			s.log.ErrorContext(ctx, "skills sync panicked", "panic", fmt.Sprint(r))
 		}
 	}()
 	if err := s.Sync(ctx); err != nil {
 		if ctx.Err() == nil {
-			s.log.Warn("skills sync failed; keeping last good snapshot", "error", sanitize(err.Error(), s.cfg.SSHKey), "consecutive_failures", s.Status().ConsecutiveFailures)
+			s.log.WarnContext(ctx, "skills sync failed; keeping last good snapshot", "error", sanitize(err.Error(), s.cfg.SSHKey), "consecutive_failures", s.Status().ConsecutiveFailures)
 		}
 	}
 }
@@ -356,9 +356,7 @@ func (s *Syncer) syncOnce(ctx context.Context) (err error) {
 			s.status.Commit, s.status.Skills = info.Commit, info.Skills
 		}
 		s.mu.Unlock()
-		if s.observe != nil {
-			s.observe(info)
-		}
+		s.notify(ctx, info)
 	}()
 
 	if err := os.MkdirAll(s.stateDir, 0o700); err != nil {
@@ -412,14 +410,28 @@ func (s *Syncer) syncOnce(ctx context.Context) (err error) {
 	}
 	s.current.Store(snap)
 	info.Outcome, info.Skills, info.Skipped = OutcomeUpdated, len(snap.Skills), len(snap.Skipped)
-	s.log.Info("skills synced", "commit", sha, "ref", s.cfg.Ref, "skills", len(snap.Skills), "skipped", len(snap.Skipped))
+	s.log.InfoContext(ctx, "skills synced", "commit", sha, "ref", s.cfg.Ref, "skills", len(snap.Skills), "skipped", len(snap.Skipped))
 	for _, sk := range snap.Skipped {
-		s.log.Warn("skill skipped", "path", sk.Path, "reason", sk.Reason)
+		s.log.WarnContext(ctx, "skill skipped", "path", sk.Path, "reason", sk.Reason)
 	}
 	if perr := prune(s.stateDir, dir); perr != nil {
-		s.log.Warn("pruning old skill versions failed", "error", sanitize(perr.Error()))
+		s.log.WarnContext(ctx, "pruning old skill versions failed", "error", sanitize(perr.Error()))
 	}
 	return nil
+}
+
+// notify delivers info to the observer. The observer runs inline in the sync
+// path, so a panic in it (a metrics bug) is recovered and must not fail a sync.
+func (s *Syncer) notify(ctx context.Context, info SyncInfo) {
+	if s.observe == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.ErrorContext(ctx, "skills sync observer panicked")
+		}
+	}()
+	s.observe(info)
 }
 
 // updateRepo clones the bare cache on first use and fetches heads and tags.

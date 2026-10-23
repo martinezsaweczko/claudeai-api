@@ -76,12 +76,34 @@ func (app *App) initAndWire() error {
 	app.apiKeyAuth = middleware.APIKeyAuth(cfg.Claude.APIKeys)
 	logClaudeStartup(log, cfg, app.lookupEnv)
 
+	// ----- Claude and skills metrics -----
+	meterProvider := app.observability.MeterProvider
+	claudeMetrics, err := o11.NewClaudeMetrics(meterProvider)
+	if err != nil {
+		return fmt.Errorf("failed to create Claude metrics: %w", err)
+	}
+	if cfg.Skills.Enabled() || app.skills != nil {
+		if app.skillsMetrics, err = o11.NewSkillsMetrics(meterProvider); err != nil {
+			return fmt.Errorf("failed to create skills metrics: %w", err)
+		}
+	}
+
 	logSkillsStartup(log, cfg.Skills)
 	if err := app.newSkillsSyncer(); err != nil {
 		return err
 	}
+	skillNames := func() []string { return nil }
+	if app.skills != nil {
+		skillNames = currentSkillNames(app.skills)
+		if err := app.skillsMetrics.RegisterState(skillsStateFunc(app.skills)); err != nil {
+			return fmt.Errorf("failed to register skills metrics: %w", err)
+		}
+	}
 
-	claudeOpts := []claude.Option{claude.WithLogger(log)}
+	claudeOpts := []claude.Option{
+		claude.WithLogger(log),
+		claude.WithObserver(claudeRunObserver(claudeMetrics, newModelNormalizer(cfg.Claude), skillNames)),
+	}
 	if app.skills != nil {
 		claudeOpts = append(claudeOpts, claude.WithSkills(skillsProvider(app.skills)))
 	}
@@ -90,6 +112,11 @@ func (app *App) initAndWire() error {
 	}
 	if app.claude == nil {
 		app.claude = claude.NewCLIBackend(cfg.Claude, claudeOpts...)
+	}
+	if be, ok := app.claude.(interface{ InFlight() int64 }); ok {
+		if err := claudeMetrics.RegisterInFlight(be.InFlight); err != nil {
+			return fmt.Errorf("failed to register Claude metrics: %w", err)
+		}
 	}
 
 	// ----- OpenAI-compatible API (public server, base path /v1) -----

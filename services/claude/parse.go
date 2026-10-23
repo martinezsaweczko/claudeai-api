@@ -35,6 +35,9 @@ type rawLine struct {
 	} `json:"event"`
 	Message *struct {
 		Model string `json:"model"`
+		// Content is an array of blocks for assistant messages but may be a plain
+		// string on user lines, so it is decoded lazily and only where needed.
+		Content json.RawMessage `json:"content"`
 	} `json:"message"`
 
 	// result line
@@ -45,7 +48,22 @@ type rawLine struct {
 	Usage          rawUsage `json:"usage"`
 	TotalCostUSD   float64  `json:"total_cost_usd"`
 	DurationMS     int64    `json:"duration_ms"`
+	NumTurns       int      `json:"num_turns"`
 }
+
+// contentBlock is the subset of an assistant content block read to find Skill
+// tool uses. Only the skill name is ever taken from the tool input: its other
+// fields (args) may echo prompt text and are never captured.
+type contentBlock struct {
+	Type  string `json:"type"`
+	Name  string `json:"name"`
+	Input struct {
+		Skill string `json:"skill"`
+	} `json:"input"`
+}
+
+// skillToolName is the CLI tool the model calls to use a skill.
+const skillToolName = "Skill"
 
 // streamParser turns stream-json lines into Events and accumulates the final
 // Result. It is not safe for concurrent use.
@@ -59,6 +77,13 @@ type streamParser struct {
 	status    int
 	result    Result
 	errText   string
+
+	// Kept from the result line even when it is an error, so failed runs still
+	// report what they consumed.
+	usage    Usage
+	costUSD  float64
+	numTurns int
+	skills   []string // skill names the model invoked, in order
 }
 
 func newStreamParser() *streamParser { return &streamParser{} }
@@ -98,16 +123,44 @@ func (p *streamParser) feed(line []byte) ([]Event, error) {
 		if l.Message != nil && l.Message.Model != "" && l.Message.Model != syntheticModel {
 			p.model = l.Message.Model
 		}
+		if l.Message != nil {
+			p.collectSkills(l.Message.Content)
+		}
 	case "result":
 		return p.onResult(&l), nil
 	}
 	return nil, nil
 }
 
+// collectSkills records the names of Skill tool uses found in an assistant
+// message content array. Non-array content is ignored.
+func (p *streamParser) collectSkills(content json.RawMessage) {
+	if len(content) == 0 || content[0] != '[' {
+		return
+	}
+	var blocks []contentBlock
+	if err := json.Unmarshal(content, &blocks); err != nil {
+		return
+	}
+	for _, b := range blocks {
+		if b.Type == "tool_use" && b.Name == skillToolName && b.Input.Skill != "" {
+			p.skills = append(p.skills, b.Input.Skill)
+		}
+	}
+}
+
 func (p *streamParser) onResult(l *rawLine) []Event {
 	p.gotResult = true
 	p.isError = l.IsError
 	p.status = l.APIErrorStatus
+	p.usage = Usage{
+		InputTokens:         l.Usage.InputTokens,
+		OutputTokens:        l.Usage.OutputTokens,
+		CacheCreationTokens: l.Usage.CacheCreationTokens,
+		CacheReadTokens:     l.Usage.CacheReadTokens,
+	}
+	p.costUSD = l.TotalCostUSD
+	p.numTurns = l.NumTurns
 	if l.IsError {
 		p.errText = l.Result
 		return nil
@@ -121,17 +174,14 @@ func (p *streamParser) onResult(l *rawLine) []Event {
 		text = l.Result
 	}
 	p.result = Result{
-		Text:  text,
-		Model: p.model,
-		Usage: Usage{
-			InputTokens:         l.Usage.InputTokens,
-			OutputTokens:        l.Usage.OutputTokens,
-			CacheCreationTokens: l.Usage.CacheCreationTokens,
-			CacheReadTokens:     l.Usage.CacheReadTokens,
-		},
-		CostUSD:    l.TotalCostUSD,
-		DurationMS: l.DurationMS,
-		StopReason: l.StopReason,
+		Text:          text,
+		Model:         p.model,
+		Usage:         p.usage,
+		CostUSD:       l.TotalCostUSD,
+		DurationMS:    l.DurationMS,
+		StopReason:    l.StopReason,
+		NumTurns:      l.NumTurns,
+		SkillsInvoked: append([]string(nil), p.skills...),
 	}
 
 	var events []Event

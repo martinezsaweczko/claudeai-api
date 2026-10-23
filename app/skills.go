@@ -39,6 +39,9 @@ func (app *App) newSkillsSyncer() error {
 		return nil
 	}
 	opts := []skills.Option{skills.WithLogger(app.log)}
+	if app.skillsMetrics != nil {
+		opts = append(opts, skills.WithObserver(newSkillsObserver(app.skillsMetrics)))
+	}
 	if app.observability != nil && app.observability.Trace != nil {
 		opts = append(opts, skills.WithTracerProvider(app.observability.Trace))
 	}

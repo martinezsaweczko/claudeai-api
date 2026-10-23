@@ -77,7 +77,7 @@ func (v *VersionHandler) RegisterRoutes(router Router, middlewares ...middleware
 //	@Router       /api/v1/version [get]
 func (v *VersionHandler) getVersion(w http.ResponseWriter, r *http.Request) {
 
-	v.log.Info("Received request for version information")
+	v.log.InfoContext(r.Context(), "Received request for version information")
 
 	_, span := v.observability.Trace.Tracer("http/handlers/version").Start(r.Context(), "handler.GetVersion")
 	defer span.End()
@@ -90,7 +90,7 @@ func (v *VersionHandler) getVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	err := json.NewEncoder(w).Encode(versionInfo)
 	if err != nil {
-		v.log.Error("Failed to encode version information", "error", err)
+		v.log.ErrorContext(r.Context(), "Failed to encode version information", "error", err)
 		v.handlerCalls.Add(r.Context(), 1, metric.WithAttributes(
 			attribute.String("method", "GET")),
 			metric.WithAttributes(attribute.Int("http_code", http.StatusInternalServerError)),

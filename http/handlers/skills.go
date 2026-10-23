@@ -151,12 +151,12 @@ func (h *SkillsHandler) getSkills(w http.ResponseWriter, _ *http.Request) {
 //	@Success      202  {object}  skillsRefreshResponse
 //	@Failure      404  {object}  errorResponse
 //	@Router       /api/v1/skills/refresh [post]
-func (h *SkillsHandler) refresh(w http.ResponseWriter, _ *http.Request) {
+func (h *SkillsHandler) refresh(w http.ResponseWriter, r *http.Request) {
 	if h.source == nil {
 		writeJSON(w, http.StatusNotFound, errorResponse{Error: "skills_disabled"})
 		return
 	}
 	h.source.Trigger()
-	h.log.Info("Skills refresh requested")
+	h.log.InfoContext(r.Context(), "Skills refresh requested")
 	writeJSON(w, http.StatusAccepted, skillsRefreshResponse{Status: "triggered"})
 }

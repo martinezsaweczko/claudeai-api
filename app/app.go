@@ -48,6 +48,7 @@ type App struct {
 
 	// skills keeps the optional skills repository synced; nil when disabled.
 	skills               skillsSyncer
+	skillsMetrics        *o11.SkillsMetrics // nil when skills are disabled
 	skillsStop           func() error
 	initialSkillsTimeout time.Duration // test override of initialSkillsSyncTimeout
 }

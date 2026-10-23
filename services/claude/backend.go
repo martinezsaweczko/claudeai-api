@@ -42,6 +42,10 @@ type Result struct {
 	CostUSD    float64
 	DurationMS int64
 	StopReason string
+	NumTurns   int // model turns of the run (a Skill tool use adds one)
+
+	// SkillsInvoked lists the skills the model used, in order (repeats kept).
+	SkillsInvoked []string
 }
 
 // EventType identifies a streaming Event.

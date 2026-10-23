@@ -35,10 +35,19 @@ Before committing, ALL of: `go build ./...`, `go vet ./...`, `gofmt -l .` empty,
 
 ## Observability (mandatory for new code)
 
-- **Metrics**: instruments created once via `o11/metrics.go` factories or `o11.NewBusinessCounter` (name pattern: `<area>_<noun>_<verb>_total`). HTTP metrics via `middleware.MetricsMiddleware`. Meter names are `claudeai-api/{http,repository,service}`.
+- **Metrics**: instruments created once via `o11/metrics.go` / `o11/metrics_claude.go` factories or `o11.NewBusinessCounter` (name pattern: `<area>_<noun>_<verb>_total`). HTTP metrics via `middleware.MetricsMiddleware`. Meter names are `claudeai-api/{http,repository,service,claude,skills}`. See the Metrics section below.
 - **Tracing**: child spans per public service operation via the injected `trace.TracerProvider`; record errors with `span.RecordError`. External HTTP calls MUST use `services.NewExternalClient(name, timeout, serviceMetrics)`.
 - **Logs**: `log/slog` with contextual attributes; trace IDs are auto-injected by `o11.NewTraceLogHandler` (wired in `cmd/main.go`).
 - **Repository pattern note**: if a persistence layer is added later, wrap it in an instrumented decorator that adds spans and `o11.RepoMetrics` per operation (the template had `repository.InstrumentedDB` for this).
+
+## Metrics (T7)
+
+- **Catalog and names are a contract** with the Grafana dashboards: `claude_runs_total{model,outcome}`, `claude_run_duration_seconds{model}`, `claude_time_to_first_token_seconds{model}`, `claude_queue_wait_seconds{model}`, `claude_runs_in_flight`, `claude_tokens_total{model,type}`, `claude_cost_usd_total{model}`, `claude_skill_invocations_total{skill}`, `skills_sync_total{outcome}`, `skills_sync_duration_seconds`, `skills_loaded`, `skills_skipped`, `skills_sync_consecutive_failures`, `skills_last_success_timestamp_seconds`, `skills_info{commit,ref}`. The full table (types, label values, token and cost semantics) is in the README "Metrics" section; do not rename without updating `o11/metrics_claude_test.go` (exposition test) and the dashboards.
+- **Where**: factories `o11.NewClaudeMetrics` / `o11.NewSkillsMetrics` (meters `claudeai-api/claude`, `claudeai-api/skills`); adapters from `claude.RunInfo` / `skills.SyncInfo` in `app/metrics.go`, wired in `initAndWire` through `claude.WithObserver` / `skills.WithObserver`. Gauges (`claude_runs_in_flight`, `skills_*`) are observable callbacks read at scrape time (`CLIBackend.InFlight`, `Syncer.Status/Current`).
+- **Cardinality rule**: labels must be bounded. The `model` label is the CLI-resolved id, else the requested model only if advertised (`-claude-models` or the default), else `other`; `skill` is a loaded skill name or `other`; `outcome`/`type` are fixed enums. Never put a client-controlled string in a label (span attributes may hold it).
+- **Observers** must be cheap, non-blocking and panic-safe (the backend and the syncer recover), and the backend and syncer must work with no observer. Instrument names: counters end in `_total` and carry no unit, histograms use unit `s` and end in `_seconds`, so the Prometheus exporter adds no second suffix.
+- **Traces**: server span `POST /v1/chat/completions` -> child `claude.run` (attributes `claude.queue_wait_ms`, `claude.ttft_ms`, `claude.skills.{active,commit,invoked}`, tokens, cost; event `first_token`), `skills.sync` separately. Log calls on request, run and sync paths use the `*Context` slog variants so `trace_id`/`span_id` are injected; never log prompts, message content or key paths.
+- **CLI telemetry**: the child inherits the gateway environment, so `CLAUDE_CODE_ENABLE_TELEMETRY=1` plus `OTEL_*` on the gateway enables the CLI's own export (see the README); no code is involved.
 
 ## Testing conventions
 

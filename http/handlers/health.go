@@ -68,7 +68,7 @@ func (h *HealthHandler) RegisterRoutes(router Router, middlewares ...middleware.
 //	@Router       /api/v1/health [get]
 func (h *HealthHandler) getHealth(w http.ResponseWriter, r *http.Request) {
 	// Probed continuously by the orchestrator: no span and no Info log per request
-	h.log.Debug("Received request for health status")
+	h.log.DebugContext(r.Context(), "Received request for health status")
 
 	healthInfo := &model.HealthInfo{
 		Status:    "ok",
@@ -78,7 +78,7 @@ func (h *HealthHandler) getHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(healthInfo); err != nil {
-		h.log.Error("Failed to encode health information", "error", err)
+		h.log.ErrorContext(r.Context(), "Failed to encode health information", "error", err)
 		h.handlerCalls.Add(r.Context(), 1,
 			metric.WithAttributes(attribute.String("method", "GET")),
 			metric.WithAttributes(attribute.Int("http_code", http.StatusInternalServerError)),

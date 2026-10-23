@@ -26,7 +26,10 @@ func LoggingMiddleware(log *slog.Logger) Middleware {
 			duration := time.Since(start)
 
 			// Log the request
-			log.Info(
+			// The request context carries the server span (TracingMiddleware runs
+			// outside this one), so trace_id/span_id are added to the line.
+			log.InfoContext(
+				r.Context(),
 				"HTTP request",
 				"method", r.Method,
 				"path", r.RequestURI,

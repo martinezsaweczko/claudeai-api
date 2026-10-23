@@ -687,3 +687,15 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 	}
 	t.Fatal("condition not met in time")
 }
+
+func TestObserverPanicDoesNotBreakSync(t *testing.T) {
+	o := newOrigin(t)
+	o.commit("c0", marketplaceFiles(t, o))
+	s := newSyncer(t, baseConfig(t, o.dir), WithObserver(func(SyncInfo) { panic("metrics bug") }))
+	if err := s.Sync(context.Background()); err != nil {
+		t.Fatalf("a panicking observer must not fail the sync: %v", err)
+	}
+	if _, ok := s.Current(); !ok || s.Status().LastSuccess.IsZero() {
+		t.Errorf("sync result lost: %+v", s.Status())
+	}
+}

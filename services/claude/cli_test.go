@@ -37,6 +37,7 @@ const (
 	envExit     = "CLAUDE_HELPER_EXIT"
 	envStderr   = "CLAUDE_HELPER_STDERR"
 	envDir      = "CLAUDE_HELPER_DIR"
+	envDelayMS  = "CLAUDE_HELPER_DELAY_MS"
 )
 
 // TestHelperProcess is not a real test: it is the fake claude executable.
@@ -81,6 +82,12 @@ func TestHelperProcess(t *testing.T) {
 			}
 			time.Sleep(5 * time.Millisecond)
 		}
+		data, _ := os.ReadFile(os.Getenv(envFixture))
+		os.Stdout.Write(data)
+	case "delayed":
+		// Wait before emitting anything, to give time-to-first-token a known floor.
+		ms, _ := strconv.Atoi(os.Getenv(envDelayMS))
+		time.Sleep(time.Duration(ms) * time.Millisecond)
 		data, _ := os.ReadFile(os.Getenv(envFixture))
 		os.Stdout.Write(data)
 	case "hang":
@@ -520,7 +527,7 @@ func TestSpanAndObserver(t *testing.T) {
 	}
 	for k, v := range map[string]string{
 		"claude.model":         "sonnet",
-		"claude.outcome":       "ok",
+		"claude.outcome":       "success",
 		"claude.exit_code":     "0",
 		"claude.tokens.output": "4",
 		"claude.tokens.input":  "2",
@@ -532,7 +539,7 @@ func TestSpanAndObserver(t *testing.T) {
 	if _, ok := attrs["claude.duration_ms"]; !ok {
 		t.Error("missing claude.duration_ms")
 	}
-	if len(infos) != 1 || infos[0].Outcome != "ok" || infos[0].Usage.OutputTokens != 4 {
+	if len(infos) != 1 || infos[0].Outcome != "success" || infos[0].Usage.OutputTokens != 4 {
 		t.Fatalf("observer infos = %+v", infos)
 	}
 
