@@ -3,7 +3,9 @@ package config
 import (
 	"flag"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -11,6 +13,7 @@ type Config struct {
 	InternalServer ServerConfig // Internal server (health, version, metrics, swagger)
 	Log            LogConfig
 	O11            O11Config
+	Claude         ClaudeConfig // Claude CLI backend and optional API-key auth
 }
 
 // internalWriteTimeoutSeconds is the fixed write timeout of the internal server,
@@ -37,9 +40,15 @@ func (ce *ConfigError) Error() string {
 	return fmt.Sprintf("%s:\n  - %s", ce.Message, strings.Join(errMessages, "\n  - "))
 }
 
-// Load configuration from command-line flags
-// Return the configuration struct
+// LoadConfig loads configuration from command-line flags and the process
+// environment (secrets only).
 func LoadConfig() (*Config, *ConfigError) {
+	return LoadConfigFromEnv(os.LookupEnv)
+}
+
+// LoadConfigFromEnv loads configuration from command-line flags and reads
+// secrets through lookup (os.LookupEnv in production, a fake in tests).
+func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigError) {
 	config := &Config{}
 	listErrors := []error{}
 
@@ -63,6 +72,12 @@ func LoadConfig() (*Config, *ConfigError) {
 	var o11PrometheusPath string
 	var o11Environment string
 
+	// Define command-line flags for Claude backend configuration
+	var claudeBin string
+	var claudeModel string
+	var claudeTimeout time.Duration
+	var claudeMaxConcurrency int
+
 	// Flags public API server
 	flag.StringVar(&serverAddress, "http-address", "0.0.0.0", "Public API server address")
 	flag.IntVar(&serverPort, "http-port", 46564, "Public API server port")
@@ -82,6 +97,12 @@ func LoadConfig() (*Config, *ConfigError) {
 	flag.StringVar(&o11TracerEndpoint, "o11-tracer-endpoint", "", "OpenTelemetry tracer endpoint (gRPC, without http:// or https://)")
 	flag.StringVar(&o11PrometheusPath, "o11-prometheus-path", "/metrics", "OpenTelemetry Prometheus metrics path")
 	flag.StringVar(&o11Environment, "o11-environment", "dev", "Deployment environment reported in telemetry (dev, prod)")
+
+	// Claude flags (secrets come from CLAUDE_CODE_OAUTH_TOKEN and CLAUDEAI_API_KEYS, not flags)
+	flag.StringVar(&claudeBin, "claude-bin", "claude", "Claude Code CLI binary name or path")
+	flag.StringVar(&claudeModel, "claude-model", "sonnet", "Default Claude model alias when a request names none")
+	flag.DurationVar(&claudeTimeout, "claude-timeout", 5*time.Minute, "Max wall time per request")
+	flag.IntVar(&claudeMaxConcurrency, "claude-max-concurrency", 4, "Max simultaneous Claude CLI processes")
 
 	flag.Parse()
 
@@ -124,6 +145,23 @@ func LoadConfig() (*Config, *ConfigError) {
 	config.O11 = *o11Conf
 
 	if err := o11Conf.Validate(); err != nil {
+		listErrors = append(listErrors, err)
+	}
+
+	config.Claude = ClaudeConfig{
+		Bin:            claudeBin,
+		Model:          claudeModel,
+		Timeout:        claudeTimeout,
+		MaxConcurrency: claudeMaxConcurrency,
+	}
+	if v, ok := lookup(envOAuthToken); ok {
+		config.Claude.OAuthToken = strings.TrimSpace(v)
+	}
+	if v, ok := lookup(envAPIKeys); ok {
+		config.Claude.APIKeys = parseAPIKeys(v)
+	}
+
+	if err := config.Claude.validate(); err != nil {
 		listErrors = append(listErrors, err)
 	}
 

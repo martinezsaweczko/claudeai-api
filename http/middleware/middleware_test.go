@@ -3,8 +3,6 @@ package middleware
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -12,10 +10,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/martinezsaweczko/claudeai-api/o11"
-	"github.com/martinezsaweczko/claudeai-api/services"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -88,75 +84,6 @@ func TestChainMiddlewareCanShortCircuit(t *testing.T) {
 	}
 	if reached || len(calls) != 0 {
 		t.Errorf("nothing after the outer middleware should run (handler=%v, inner=%v)", reached, calls)
-	}
-}
-
-func TestAuthorizationMiddleware(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("failed to generate key: %v", err)
-	}
-	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("failed to generate key: %v", err)
-	}
-	jwtService := services.NewJWTService(key, &key.PublicKey, "claudeai-api-test", time.Minute)
-
-	valid, err := jwtService.GenerateToken("download")
-	if err != nil {
-		t.Fatalf("failed to generate token: %v", err)
-	}
-	expired, err := jwtService.GenerateTokenWithExpiry("download", -time.Minute)
-	if err != nil {
-		t.Fatalf("failed to generate token: %v", err)
-	}
-	foreign, err := services.NewJWTService(otherKey, &otherKey.PublicKey, "claudeai-api-test", time.Minute).GenerateToken("download")
-	if err != nil {
-		t.Fatalf("failed to generate token: %v", err)
-	}
-
-	tests := []struct {
-		name       string
-		header     string
-		wantStatus int
-		wantBody   string
-	}{
-		{"valid bearer token", "Bearer " + valid, http.StatusOK, "protected"},
-		{"missing header", "", http.StatusUnauthorized, "missing authorization header"},
-		{"token without scheme", valid, http.StatusUnauthorized, "invalid authorization header format"},
-		{"wrong scheme", "Basic " + valid, http.StatusUnauthorized, "invalid authorization header format"},
-		{"scheme is case sensitive", "bearer " + valid, http.StatusUnauthorized, "invalid authorization header format"},
-		{"malformed token", "Bearer not-a-jwt", http.StatusUnauthorized, "invalid token"},
-		{"expired token", "Bearer " + expired, http.StatusUnauthorized, "invalid token"},
-		{"token signed by another key", "Bearer " + foreign, http.StatusUnauthorized, "invalid token"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			reached := false
-			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				reached = true
-				_, _ = w.Write([]byte("protected"))
-			})
-			handler := AuthorizationMiddleware(testLogger(), jwtService)(next)
-
-			req := httptest.NewRequest(http.MethodGet, "/private", nil)
-			if tt.header != "" {
-				req.Header.Set("Authorization", tt.header)
-			}
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-
-			if rec.Code != tt.wantStatus {
-				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
-			}
-			if !strings.Contains(rec.Body.String(), tt.wantBody) {
-				t.Errorf("body = %q, want it to contain %q", rec.Body.String(), tt.wantBody)
-			}
-			if wantReached := tt.wantStatus == http.StatusOK; reached != wantReached {
-				t.Errorf("next handler reached = %v, want %v", reached, wantReached)
-			}
-		})
 	}
 }
 

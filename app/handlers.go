@@ -46,6 +46,10 @@ func (app *App) initAndWire() error {
 
 	swaggerHandler := handlers.NewSwaggerHandler(log, app.basePath)
 
+	// ----- Claude backend security posture -----
+	app.apiKeyAuth = middleware.APIKeyAuth(cfg.Claude.APIKeys)
+	logClaudeStartup(log, cfg, app.lookupEnv)
+
 	// ----- Routes -----
 	loggingMiddleware := middleware.LoggingMiddleware(log)
 

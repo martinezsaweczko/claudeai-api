@@ -36,12 +36,18 @@ type App struct {
 	observability  *o11.ObservabilityInst
 	buildInfo      model.BuildInfo
 	basePath       string
+	lookupEnv      func(string) (string, bool)
+
+	// apiKeyAuth guards the /v1 routes (attached when they are added). It is a
+	// pass-through when no API keys are configured.
+	apiKeyAuth middleware.Middleware
 }
 
 func NewApp(cfg *config.Config) *App {
 	return &App{
-		config: cfg,
-		ctx:    context.Background(),
+		config:    cfg,
+		ctx:       context.Background(),
+		lookupEnv: os.LookupEnv,
 	}
 }
 

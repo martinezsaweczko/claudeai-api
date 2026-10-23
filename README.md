@@ -19,7 +19,7 @@ app/               App builder + wiring
 config/            CLI flag configuration with validation
 http_server/       net/http server wrapper (synchronous bind, graceful stop)
 http/              handlers (health, version, metrics, swagger) + middleware
-services/          shared service helpers (instrumented HTTP client, JWT)
+services/          shared service helpers (instrumented HTTP client)
 o11/               OTel setup, metrics factories, trace-aware slog handler
 ```
 
@@ -52,7 +52,32 @@ make check-swagger     # verify generated Swagger docs are up to date
 | `-o11-prometheus-path` | `/metrics` | Metrics path on the internal server |
 | `-o11-environment` | `dev` | Environment tag in telemetry |
 
+| `-claude-bin` | `claude` | Claude Code CLI binary name or path |
+| `-claude-model` | `sonnet` | Default model alias when a request names none |
+| `-claude-timeout` | `5m` | Max wall time per request |
+| `-claude-max-concurrency` | `4` | Max simultaneous CLI processes (>= 1) |
+
 Full list: `./build/main -h`
+
+### Secrets and authentication
+
+Secrets are read from environment variables, not flags (flags are visible in process lists). This deliberately deviates from the flags-only convention of the rest of the config.
+
+| Variable | Description |
+|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` | Optional. Token from `claude setup-token`. If unset, the CLI uses its own stored login. Never logged. |
+| `CLAUDEAI_API_KEYS` | Optional, comma-separated client API keys. If unset or empty, authentication is **off**. |
+| `ANTHROPIC_API_KEY` | Do not set: it overrides the subscription login and bills the API key. The service warns if it is set. |
+
+When keys are configured, the `/v1` API requires `Authorization: Bearer <key>` and answers failures with `401`, `WWW-Authenticate: Bearer` and an OpenAI-style body (`missing_api_key` / `invalid_api_key`). The internal server (health, version, metrics, Swagger) is never authenticated. With auth disabled and a non-loopback `-http-address` the service logs a warning at startup; for local-only use pass `-http-address 127.0.0.1`.
+
+```bash
+# auth disabled (no CLAUDEAI_API_KEYS)
+curl http://127.0.0.1:46564/v1/models
+
+# auth enabled (CLAUDEAI_API_KEYS=key1,key2)
+curl -H "Authorization: Bearer key1" http://127.0.0.1:46564/v1/models
+```
 
 ## API documentation
 

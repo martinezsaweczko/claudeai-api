@@ -36,4 +36,8 @@ make ci                                   # the CI checks locally (all but the c
 
 ### Middleware order
 
-The first middleware listed in `middleware.Chain` is the outermost: tracing -> metrics -> logging -> authorization -> handler. The response-writer wrapper shared by logging and metrics implements `Flush` and `Unwrap`.
+The first middleware listed in `middleware.Chain` is the outermost: tracing -> metrics -> logging -> API-key auth (`middleware.APIKeyAuth`, a pass-through when `CLAUDEAI_API_KEYS` is unset) -> handler. The response-writer wrapper shared by logging and metrics implements `Flush` and `Unwrap`.
+
+### Claude configuration and secrets
+
+Flags: `-claude-bin` (`claude`), `-claude-model` (`sonnet`), `-claude-timeout` (`5m`), `-claude-max-concurrency` (`4`, >= 1). Secrets use environment variables, not flags: `CLAUDE_CODE_OAUTH_TOKEN` (optional) and `CLAUDEAI_API_KEYS` (optional, comma-separated; unset means no client auth). `initAndWire` builds `app.apiKeyAuth` and logs `api_key_auth=enabled|disabled` plus warnings (unauthenticated on a non-loopback `-http-address`; `ANTHROPIC_API_KEY` set in the environment). The `/v1` routes (added later) attach `app.apiKeyAuth`.
