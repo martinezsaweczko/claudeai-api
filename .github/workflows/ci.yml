@@ -43,13 +43,10 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
 
       - name: Verify go.mod tidiness
-        run: |
-          go mod tidy
-          git diff --exit-code go.mod go.sum || (echo "go.mod or go.sum is not tidy" && exit 1)
+        run: go mod tidy -diff
 
-      - name: Install swag
-        run: go install github.com/swaggo/swag/cmd/swag@latest
-
+      # swag runs from the version pinned in go.mod (`go run`, see the Makefile),
+      # so there is nothing to install here.
       - name: Verify Swagger docs are up to date
         run: make check-swagger
 
@@ -76,13 +73,42 @@ jobs:
             echo "Total: **${total}%** (generated \`docs\` package excluded)"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # Builds the production image (downloads and verifies the pinned Claude Code
+      # CLI, see the Containerfile) without pushing it, then smoke-tests the tools
+      # the gateway shells out to. No Claude credentials are needed or used.
       - name: Verify container build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: Containerfile
           push: false
-          tags: whatsappbot-golang:ci
+          load: true
+          tags: claudeai-api:ci
+          build-args: |
+            VERSION=ci
+            BUILD_TIME=${{ github.event.head_commit.timestamp || 'unknown' }}
+
+      - name: Smoke-test container tools
+        run: |
+          for cmd in "claude --version" "git --version" "ssh -V"; do
+            docker run --rm --entrypoint sh claudeai-api:ci -c "$cmd"
+          done
+
+      # Health is public and lives on the single port (46564), the default of
+      # -health-check; no Claude credentials are needed.
+      - name: Smoke-test container health
+        run: |
+          docker run -d --name ci-gateway claudeai-api:ci
+          for i in $(seq 1 20); do
+            if docker exec ci-gateway /usr/local/bin/claudeai-api -health-check; then
+              docker rm -f ci-gateway
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs ci-gateway
+          docker rm -f ci-gateway
+          exit 1
 
   # Publishes the shields.io endpoint file behind the README coverage badge.
   # The orphan `badges` branch holds a single commit with coverage.json only.

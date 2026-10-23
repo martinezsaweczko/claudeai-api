@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "Professional operations dashboard for the WhatsApp Bot (Go).",
+  "description": "Operations dashboard for the claudeai-api service (Go).",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -24,251 +24,6 @@
       "panels": []
     },
     {
-      "id": 2,
-      "type": "stat",
-      "title": "Total commands",
-      "targets": [
-        {
-          "expr": "sum(increase(whatsapp_commands_total{command=~\"$command\"}[$__range]))",
-          "legendFormat": "commands",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 0,
-        "y": 1
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 3,
-      "type": "stat",
-      "title": "Commands / min",
-      "targets": [
-        {
-          "expr": "sum(rate(whatsapp_commands_total{command=~\"$command\"}[5m])) * 60",
-          "legendFormat": "cmd/min",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 4,
-        "y": 1
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "cpm",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 4,
-      "type": "stat",
-      "title": "Errors + Panics",
-      "targets": [
-        {
-          "expr": "sum(increase(whatsapp_commands_total{command=~\"$command\",result=~\"error|panic\"}[$__range]))",
-          "legendFormat": "errors",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 8,
-        "y": 1
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          },
-          {
-            "color": "red",
-            "value": 1
-          }
-        ]
-      }
-    },
-    {
-      "id": 5,
-      "type": "stat",
-      "title": "Avg duration",
-      "targets": [
-        {
-          "expr": "sum(rate(whatsapp_command_duration_seconds_sum{command=~\"$command\"}[5m])) / sum(rate(whatsapp_command_duration_seconds_count{command=~\"$command\"}[5m]))",
-          "legendFormat": "avg",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 12,
-        "y": 1
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {},
-          "decimals": 3
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
       "id": 6,
       "type": "gauge",
       "title": "HTTP in flight",
@@ -288,7 +43,7 @@
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 16,
+        "x": 0,
         "y": 1
       },
       "fieldConfig": {
@@ -331,13 +86,92 @@
       }
     },
     {
-      "id": 7,
+      "id": 101,
       "type": "stat",
-      "title": "Files served",
+      "title": "Claude success ratio",
+      "description": "Share of Claude runs that finished with outcome success over the selected time range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
-          "expr": "sum(increase(files_served_total{status=\"200\"}[$__range]))",
-          "legendFormat": "files",
+          "expr": "sum(increase(claude_runs_total{outcome=\"success\"}[$__range])) / sum(increase(claude_runs_total[$__range]))",
+          "legendFormat": "success",
+          "refId": "A",
+          "instant": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 7,
+        "x": 4,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.9
+              },
+              {
+                "color": "green",
+                "value": 0.99
+              }
+            ]
+          },
+          "custom": {},
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 102,
+      "type": "stat",
+      "title": "Claude runs in flight",
+      "description": "Claude CLI processes running right now (callers waiting for a concurrency slot are not counted).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum(claude_runs_in_flight)",
+          "legendFormat": "running",
           "refId": "A",
           "instant": false,
           "format": "time_series",
@@ -349,18 +183,27 @@
       ],
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 20,
+        "w": 6,
+        "x": 11,
         "y": 1
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "min": 0,
           "color": {
             "mode": "thresholds"
           },
-          "custom": {}
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {},
+          "min": 0
         },
         "overrides": []
       },
@@ -379,21 +222,81 @@
         "showPercentChange": false,
         "textMode": "auto",
         "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
       }
     },
     {
-      "id": 8,
+      "id": 103,
+      "type": "stat",
+      "title": "Skills loaded",
+      "description": "Skills in the current snapshot of the skills repository (0 or no data when skills are disabled).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "max(skills_loaded)",
+          "legendFormat": "skills",
+          "refId": "A",
+          "instant": false,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 7,
+        "x": 17,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "custom": {},
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 104,
       "type": "row",
-      "title": "WhatsApp Commands",
+      "title": "Claude Runs",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -404,13 +307,18 @@
       "panels": []
     },
     {
-      "id": 9,
+      "id": 105,
       "type": "timeseries",
-      "title": "Commands / sec by command",
+      "title": "Claude runs / sec by outcome",
+      "description": "Finished Claude CLI runs per second, stacked by outcome.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
-          "expr": "sum by (command) (rate(whatsapp_commands_total{command=~\"$command\"}[5m]))",
-          "legendFormat": "{{command}}",
+          "expr": "sum by (outcome) (rate(claude_runs_total{model=~\"$model\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
           "refId": "A",
           "instant": false,
           "format": "time_series",
@@ -422,13 +330,259 @@
       ],
       "gridPos": {
         "h": 7,
-        "w": 16,
+        "w": 12,
         "x": 0,
         "y": 6
       },
       "fieldConfig": {
         "defaults": {
           "unit": "ops",
+          "min": 0,
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 106,
+      "type": "stat",
+      "title": "Claude success ratio (5m)",
+      "description": "Share of runs that finished with outcome success over the last 5 minutes; red below 90%, yellow below 99%.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(claude_runs_total{model=~\"$model\",outcome=\"success\"}[5m])) / sum(rate(claude_runs_total{model=~\"$model\"}[5m]))",
+          "legendFormat": "success",
+          "refId": "A",
+          "instant": false,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.9
+              },
+              {
+                "color": "green",
+                "value": 0.99
+              }
+            ]
+          },
+          "custom": {},
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 107,
+      "type": "bargauge",
+      "title": "Claude errors by outcome",
+      "description": "Non-success Claude runs per outcome over the selected time range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (increase(claude_runs_total{model=~\"$model\",outcome!=\"success\"}[$__range]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A",
+          "instant": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 6
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "valueMode": "color",
+        "showUnfilled": true,
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "namePlacement": "auto",
+        "sizing": "auto",
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
+      "id": 108,
+      "type": "timeseries",
+      "title": "Claude run duration",
+      "description": "Whole-call duration (including the wait for a concurrency slot) at p50, p95 and p99.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(claude_run_duration_seconds_bucket{model=~\"$model\"}[$__rate_interval])))",
+          "legendFormat": "p50",
+          "refId": "A",
+          "instant": false,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(claude_run_duration_seconds_bucket{model=~\"$model\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "B",
+          "instant": false,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(claude_run_duration_seconds_bucket{model=~\"$model\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "C",
+          "instant": false,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
           "min": 0,
           "custom": {
             "axisCenteredZero": false,
@@ -473,13 +627,18 @@
       }
     },
     {
-      "id": 10,
-      "type": "piechart",
-      "title": "Result distribution",
+      "id": 109,
+      "type": "timeseries",
+      "title": "Claude time to first token",
+      "description": "Time from the start of the call to the first text delta (includes queue wait; a skill tool call adds a model turn) at p50 and p95.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
-          "expr": "sum by (result) (increase(whatsapp_commands_total{command=~\"$command\"}[$__range]))",
-          "legendFormat": "{{result}}",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(claude_time_to_first_token_seconds_bucket{model=~\"$model\"}[$__rate_interval])))",
+          "legendFormat": "p50",
           "refId": "A",
           "instant": false,
           "format": "time_series",
@@ -487,135 +646,11 @@
             "type": "prometheus",
             "uid": "${datasource}"
           }
-        }
-      ],
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 6
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          }
         },
-        "overrides": []
-      },
-      "options": {
-        "pieType": "donut",
-        "displayLabels": [
-          "percent"
-        ],
-        "legend": {
-          "displayMode": "list",
-          "placement": "right",
-          "showLegend": true,
-          "values": [
-            "value"
-          ]
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        },
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        }
-      }
-    },
-    {
-      "id": 11,
-      "type": "barchart",
-      "title": "Total commands by command",
-      "targets": [
         {
-          "expr": "sum by (command) (increase(whatsapp_commands_total{command=~\"$command\"}[$__range]))",
-          "legendFormat": "{{command}}",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 13
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "min": 0,
-          "custom": {
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineWidth": 1,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "orientation": "horizontal",
-        "xTickLabelRotation": 0,
-        "xTickLabelSpacing": 0,
-        "showValue": "auto",
-        "stacking": {
-          "mode": "none",
-          "group": "A"
-        },
-        "groupWidth": 0.7,
-        "barWidth": 0.97,
-        "barRadius": 0,
-        "fullHighlight": false,
-        "legend": {
-          "displayMode": "list",
-          "placement": "right",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 12,
-      "type": "barchart",
-      "title": "Errors by command",
-      "targets": [
-        {
-          "expr": "sum by (command) (increase(whatsapp_commands_total{command=~\"$command\",result=\"error\"}[$__range]))",
-          "legendFormat": "{{command}}",
-          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(claude_time_to_first_token_seconds_bucket{model=~\"$model\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "B",
           "instant": false,
           "format": "time_series",
           "datasource": {
@@ -632,62 +667,178 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
+          "unit": "s",
           "min": 0,
           "custom": {
-            "axisPlacement": "auto",
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
             "axisLabel": "",
-            "fillOpacity": 80,
-            "gradientMode": "none",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
             },
-            "lineWidth": 1,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
             "scaleDistribution": {
               "type": "linear"
             },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
+            "showPoints": "auto",
+            "spanNulls": false
           }
         },
         "overrides": []
       },
       "options": {
-        "orientation": "horizontal",
-        "xTickLabelRotation": 0,
-        "xTickLabelSpacing": 0,
-        "showValue": "auto",
-        "stacking": {
-          "mode": "none",
-          "group": "A"
-        },
-        "groupWidth": 0.7,
-        "barWidth": 0.97,
-        "barRadius": 0,
-        "fullHighlight": false,
         "legend": {
-          "displayMode": "list",
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
           "placement": "right",
-          "showLegend": true,
-          "calcs": []
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
         }
       }
     },
     {
-      "id": 13,
-      "type": "table",
-      "title": "Command breakdown",
+      "id": 110,
+      "type": "timeseries",
+      "title": "Claude queue wait p95 and runs in flight",
+      "description": "p95 wait for a concurrency slot (left axis) next to the CLI processes running now (right axis); a rising wait with in flight at the limit means -claude-max-concurrency is saturated.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
-          "expr": "sum by (command, result) (increase(whatsapp_commands_total{command=~\"$command\"}[$__range]))",
-          "legendFormat": "{{command}} — {{result}}",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(claude_queue_wait_seconds_bucket{model=~\"$model\"}[$__rate_interval])))",
+          "legendFormat": "queue wait p95",
+          "refId": "A",
+          "instant": false,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        },
+        {
+          "expr": "sum(claude_runs_in_flight)",
+          "legendFormat": "in flight",
+          "refId": "B",
+          "instant": false,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "in flight"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "short"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 111,
+      "type": "row",
+      "title": "Tokens & Cost",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 27
+      },
+      "panels": []
+    },
+    {
+      "id": 112,
+      "type": "timeseries",
+      "title": "Tokens / sec by type",
+      "description": "Tokens reported by the CLI per second, stacked by type (input, output, cache_creation, cache_read).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (type) (rate(claude_tokens_total{model=~\"$model\"}[$__rate_interval]))",
+          "legendFormat": "{{type}}",
           "refId": "A",
           "instant": false,
           "format": "time_series",
@@ -698,10 +849,599 @@
         }
       ],
       "gridPos": {
-        "h": 8,
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 113,
+      "type": "stat",
+      "title": "Estimated cost (last 24h)",
+      "description": "Cost over the last 24 hours as estimated by the Claude CLI at list prices; it is an estimate, not billing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(claude_cost_usd_total{model=~\"$model\"}[24h]))",
+          "legendFormat": "cost",
+          "refId": "A",
+          "instant": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 28
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {},
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 114,
+      "type": "stat",
+      "title": "Cache hit ratio",
+      "description": "cache_read tokens divided by all prompt-side tokens (input + cache_creation + cache_read) over the selected time range.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(claude_tokens_total{model=~\"$model\",type=\"cache_read\"}[$__range])) / sum(increase(claude_tokens_total{model=~\"$model\",type=~\"input|cache_creation|cache_read\"}[$__range]))",
+          "legendFormat": "cache hit",
+          "refId": "A",
+          "instant": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 28
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "green",
+                "value": 0.8
+              }
+            ]
+          },
+          "custom": {},
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 115,
+      "type": "timeseries",
+      "title": "Estimated cost per hour by model",
+      "description": "Estimated USD per hour (rate times 3600) by model, from the CLI's own cost estimate, not billing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (model) (rate(claude_cost_usd_total{model=~\"$model\"}[$__rate_interval])) * 3600",
+          "legendFormat": "{{model}}",
+          "refId": "A",
+          "instant": false,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "min": 0,
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 116,
+      "type": "timeseries",
+      "title": "Average prompt tokens per run",
+      "description": "Prompt-side tokens (input + cache_creation + cache_read) per run; the CLI sums every turn, so runs that use a skill count more than the final prompt, and failed runs without tokens dilute the average.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(claude_tokens_total{model=~\"$model\",type=~\"input|cache_creation|cache_read\"}[$__rate_interval])) / sum(rate(claude_runs_total{model=~\"$model\"}[$__rate_interval]))",
+          "legendFormat": "prompt tokens / run",
+          "refId": "A",
+          "instant": false,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "opacity",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 117,
+      "type": "row",
+      "title": "Skills",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
         "w": 24,
         "x": 0,
-        "y": 20
+        "y": 42
+      },
+      "panels": []
+    },
+    {
+      "id": 118,
+      "type": "stat",
+      "title": "Skills loaded",
+      "description": "Skills in the current snapshot of the skills repository.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "max(skills_loaded)",
+          "legendFormat": "loaded",
+          "refId": "A",
+          "instant": false,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 43
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "custom": {},
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 119,
+      "type": "stat",
+      "title": "Seconds since last successful sync",
+      "description": "Age of the last successful skills sync; yellow above 900 s and red above 3600 s, fixed values that assume the default -skills-refresh of 5 minutes (adjust if you refresh less often).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "time() - max(skills_last_success_timestamp_seconds)",
+          "legendFormat": "age",
+          "refId": "A",
+          "instant": false,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 4,
+        "y": 43
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 900
+              },
+              {
+                "color": "red",
+                "value": 3600
+              }
+            ]
+          },
+          "custom": {},
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 120,
+      "type": "stat",
+      "title": "Consecutive sync failures",
+      "description": "Skills syncs that failed in a row (0 after a success); red as soon as there is one.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "max(skills_sync_consecutive_failures)",
+          "legendFormat": "failures",
+          "refId": "A",
+          "instant": false,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 5,
+        "x": 10,
+        "y": 43
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "custom": {},
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 121,
+      "type": "table",
+      "title": "Current skills version",
+      "description": "Commit (12 characters) and ref of the skills snapshot currently in use.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (commit, ref) (skills_info)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "format": "table",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 15,
+        "y": 43
       },
       "fieldConfig": {
         "defaults": {
@@ -721,1369 +1461,46 @@
         "cellHeight": "sm",
         "footer": {
           "show": false,
-          "reducer": [],
-          "countRows": false
-        }
-      },
-      "transformations": []
-    },
-    {
-      "id": 14,
-      "type": "row",
-      "title": "Performance Percentiles",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 28
-      },
-      "panels": []
-    },
-    {
-      "id": 15,
-      "type": "timeseries",
-      "title": "p50 / p90 / p95 / p99 duration",
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(whatsapp_command_duration_seconds_bucket{command=~\"$command\"}[$__rate_interval])))",
-          "legendFormat": "p50",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        },
-        {
-          "expr": "histogram_quantile(0.90, sum by (le) (rate(whatsapp_command_duration_seconds_bucket{command=~\"$command\"}[$__rate_interval])))",
-          "legendFormat": "p90",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        },
-        {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(whatsapp_command_duration_seconds_bucket{command=~\"$command\"}[$__rate_interval])))",
-          "legendFormat": "p95",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        },
-        {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(whatsapp_command_duration_seconds_bucket{command=~\"$command\"}[$__rate_interval])))",
-          "legendFormat": "p99",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 29
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "min": 0,
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "opacity",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean",
-            "max"
+          "reducer": [
+            "sum"
           ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
+          "countRows": false,
+          "fields": ""
         }
-      }
-    },
-    {
-      "id": 16,
-      "type": "heatmap",
-      "title": "Duration heatmap",
-      "targets": [
-        {
-          "expr": "sum by (le) (rate(whatsapp_command_duration_seconds_bucket{command=~\"$command\"}[$__rate_interval]))",
-          "legendFormat": "duration",
-          "refId": "A",
-          "instant": false,
-          "format": "heatmap",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 12,
-        "y": 29
       },
-      "dataFormat": "tsbuckets",
-      "heatmap": {},
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "hideFrom": {
-              "tooltip": false,
-              "viz": false,
-              "legend": false
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true
+            },
+            "indexByName": {
+              "commit": 0,
+              "ref": 1
+            },
+            "renameByName": {
+              "commit": "Commit",
+              "ref": "Ref"
             }
           }
-        },
-        "overrides": []
-      },
-      "options": {
-        "calculate": false,
-        "yAxis": {
-          "axisPlacement": "left",
-          "reverse": false,
-          "unit": "s"
-        },
-        "rowsFrame": {
-          "layout": "le"
-        },
-        "color": {
-          "exponent": 0.5,
-          "fill": "dark-orange",
-          "mode": "opacity",
-          "reverse": false,
-          "scale": "exponential",
-          "scheme": "Oranges",
-          "steps": 64
-        },
-        "cellGap": 1,
-        "filter": {
-          "max": 0,
-          "min": 0
-        },
-        "tooltip": {
-          "mode": "single",
-          "yHistogram": false,
-          "show": true
-        },
-        "legend": {
-          "show": true
         }
-      }
+      ]
     },
     {
-      "id": 17,
+      "id": 122,
       "type": "timeseries",
-      "title": "p95 duration by command",
+      "title": "Skills sync outcomes / sec",
+      "description": "Skills repository syncs per second by outcome (success: new version, noop: already current, error).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, command) (rate(whatsapp_command_duration_seconds_bucket{command=~\"$command\"}[$__rate_interval])))",
-          "legendFormat": "{{command}}",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 7,
-        "w": 24,
-        "x": 0,
-        "y": 36
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "min": 0,
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "opacity",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 18,
-      "type": "row",
-      "title": "Newspaper & Kiosk",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 43
-      },
-      "panels": []
-    },
-    {
-      "id": 19,
-      "type": "stat",
-      "title": "Links generated",
-      "targets": [
-        {
-          "expr": "sum(increase(kiosk_links_generated_total[$__range]))",
-          "legendFormat": "links",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 0,
-        "y": 44
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 20,
-      "type": "stat",
-      "title": "Lists served",
-      "targets": [
-        {
-          "expr": "sum(increase(kiosk_lists_served_total[$__range]))",
-          "legendFormat": "lists",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 4,
-        "y": 44
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 21,
-      "type": "stat",
-      "title": "PDF downloads",
-      "targets": [
-        {
-          "expr": "sum(increase(channelpdf_downloads_total{result=\"ok\"}[$__range]))",
-          "legendFormat": "downloads",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 8,
-        "y": 44
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 22,
-      "type": "stat",
-      "title": "PDF saved",
-      "targets": [
-        {
-          "expr": "sum(increase(channelpdf_saved_total{result=\"new\"}[$__range]))",
-          "legendFormat": "new",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 12,
-        "y": 44
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 23,
-      "type": "stat",
-      "title": "PDF notifications",
-      "targets": [
-        {
-          "expr": "sum(increase(channelpdf_notify_total{result=\"ok\"}[$__range]))",
-          "legendFormat": "notified",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 16,
-        "y": 44
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 24,
-      "type": "stat",
-      "title": "Files served 200",
-      "targets": [
-        {
-          "expr": "sum(increase(files_served_total{status=\"200\"}[$__range]))",
-          "legendFormat": "200",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 20,
-        "y": 44
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 25,
-      "type": "barchart",
-      "title": "Files served by category",
-      "targets": [
-        {
-          "expr": "sum by (category) (increase(files_served_total{status=\"200\"}[$__range]))",
-          "legendFormat": "{{category}}",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 48
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "min": 0,
-          "custom": {
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineWidth": 1,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "orientation": "horizontal",
-        "xTickLabelRotation": 0,
-        "xTickLabelSpacing": 0,
-        "showValue": "auto",
-        "stacking": {
-          "mode": "none",
-          "group": "A"
-        },
-        "groupWidth": 0.7,
-        "barWidth": 0.97,
-        "barRadius": 0,
-        "fullHighlight": false,
-        "legend": {
-          "displayMode": "list",
-          "placement": "right",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 26,
-      "type": "piechart",
-      "title": "Files HTTP status",
-      "targets": [
-        {
-          "expr": "sum by (status) (increase(files_served_total[$__range]))",
-          "legendFormat": "{{status}}",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 7,
-        "w": 6,
-        "x": 12,
-        "y": 48
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "pieType": "donut",
-        "displayLabels": [
-          "percent"
-        ],
-        "legend": {
-          "displayMode": "list",
-          "placement": "right",
-          "showLegend": true,
-          "values": [
-            "value"
-          ]
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        },
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        }
-      }
-    },
-    {
-      "id": 27,
-      "type": "piechart",
-      "title": "Links by category",
-      "targets": [
-        {
-          "expr": "sum by (category) (increase(kiosk_links_generated_total[$__range]))",
-          "legendFormat": "{{category}}",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 7,
-        "w": 6,
-        "x": 18,
-        "y": 48
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "custom": {
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "pieType": "donut",
-        "displayLabels": [
-          "percent"
-        ],
-        "legend": {
-          "displayMode": "list",
-          "placement": "right",
-          "showLegend": true,
-          "values": [
-            "value"
-          ]
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        },
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        }
-      }
-    },
-    {
-      "id": 28,
-      "type": "row",
-      "title": "Subscriptions",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 55
-      },
-      "panels": []
-    },
-    {
-      "id": 29,
-      "type": "timeseries",
-      "title": "Subscription events / sec",
-      "targets": [
-        {
-          "expr": "sum by (action) (rate(subscription_events_total[5m]))",
-          "legendFormat": "{{action}}",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 56
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "min": 0,
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "opacity",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 30,
-      "type": "stat",
-      "title": "Notifications sent",
-      "targets": [
-        {
-          "expr": "sum(increase(subscription_notifications_sent_total[$__range]))",
-          "legendFormat": "sent",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 12,
-        "y": 56
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 31,
-      "type": "stat",
-      "title": "Subscriptions created",
-      "targets": [
-        {
-          "expr": "sum(increase(subscription_events_total{action=\"create\"}[$__range]))",
-          "legendFormat": "create",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 16,
-        "y": 56
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 32,
-      "type": "stat",
-      "title": "Subscriptions deleted",
-      "targets": [
-        {
-          "expr": "sum(increase(subscription_events_total{action=\"delete\"}[$__range]))",
-          "legendFormat": "delete",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 20,
-        "y": 56
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 33,
-      "type": "row",
-      "title": "AI, Image, TTS & Electricity",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 63
-      },
-      "panels": []
-    },
-    {
-      "id": 34,
-      "type": "timeseries",
-      "title": "AI replies / sec by mode",
-      "targets": [
-        {
-          "expr": "sum by (mode) (rate(ai_replies_total[5m]))",
-          "legendFormat": "{{mode}}",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 0,
-        "y": 64
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "min": 0,
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "opacity",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 35,
-      "type": "stat",
-      "title": "Images generated",
-      "targets": [
-        {
-          "expr": "sum(increase(images_generated_total[$__range]))",
-          "legendFormat": "images",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 12,
-        "y": 64
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 36,
-      "type": "stat",
-      "title": "TTS messages",
-      "targets": [
-        {
-          "expr": "sum(increase(tts_messages_total[$__range]))",
-          "legendFormat": "tts",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 16,
-        "y": 64
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 37,
-      "type": "stat",
-      "title": "Charts rendered",
-      "targets": [
-        {
-          "expr": "sum(increase(charts_rendered_total[$__range]))",
-          "legendFormat": "charts",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 20,
-        "y": 64
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "short",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
-      }
-    },
-    {
-      "id": 38,
-      "type": "piechart",
-      "title": "Electricity cache",
-      "targets": [
-        {
-          "expr": "sum by (result) (increase(electricity_cache_total[$__range]))",
-          "legendFormat": "{{result}}",
+          "expr": "sum by (outcome) (rate(skills_sync_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}}",
           "refId": "A",
           "instant": false,
           "format": "time_series",
@@ -2097,88 +1514,71 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 71
+        "y": 48
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
+          "unit": "ops",
+          "min": 0,
           "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "gradientMode": "opacity",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
+            },
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
             }
           }
         },
         "overrides": []
       },
       "options": {
-        "pieType": "donut",
-        "displayLabels": [
-          "percent"
-        ],
         "legend": {
-          "displayMode": "list",
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
           "placement": "right",
-          "showLegend": true,
-          "values": [
-            "value"
-          ]
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "single",
+          "mode": "multi",
           "sort": "none"
-        },
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
         }
       }
     },
     {
-      "id": 39,
+      "id": 123,
       "type": "timeseries",
-      "title": "Feature totals / sec",
+      "title": "Skills sync duration p95",
+      "description": "p95 duration of a skills repository sync (git fetch or clone plus materialization).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "targets": [
         {
-          "expr": "rate(images_generated_total[5m])",
-          "legendFormat": "images",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        },
-        {
-          "expr": "rate(tts_messages_total[5m])",
-          "legendFormat": "tts",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        },
-        {
-          "expr": "rate(charts_rendered_total[5m])",
-          "legendFormat": "electricity",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        },
-        {
-          "expr": "rate(ai_replies_total[5m])",
-          "legendFormat": "ai",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(skills_sync_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "p95",
           "refId": "A",
           "instant": false,
           "format": "time_series",
@@ -2190,13 +1590,13 @@
       ],
       "gridPos": {
         "h": 7,
-        "w": 16,
+        "w": 8,
         "x": 8,
-        "y": 71
+        "y": 48
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ops",
+          "unit": "s",
           "min": 0,
           "custom": {
             "axisCenteredZero": false,
@@ -2241,15 +1641,87 @@
       }
     },
     {
+      "id": 124,
+      "type": "bargauge",
+      "title": "Skill invocations",
+      "description": "Skill tool uses by skill name over the selected time range (names outside the loaded snapshot are reported as other).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (skill) (increase(claude_skill_invocations_total[$__range]))",
+          "legendFormat": "{{skill}}",
+          "refId": "A",
+          "instant": true,
+          "format": "time_series",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 48
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "valueMode": "color",
+        "showUnfilled": true,
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "namePlacement": "auto",
+        "sizing": "auto",
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        }
+      }
+    },
+    {
       "id": 40,
       "type": "row",
-      "title": "HTTP Server & JWT",
+      "title": "HTTP Server",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 78
+        "y": 55
       },
       "panels": []
     },
@@ -2274,7 +1746,7 @@
         "h": 7,
         "w": 16,
         "x": 0,
-        "y": 79
+        "y": 56
       },
       "fieldConfig": {
         "defaults": {
@@ -2343,7 +1815,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 79
+        "y": 56
       },
       "fieldConfig": {
         "defaults": {
@@ -2405,7 +1877,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 86
+        "y": 63
       },
       "fieldConfig": {
         "defaults": {
@@ -2454,79 +1926,6 @@
       }
     },
     {
-      "id": 44,
-      "type": "barchart",
-      "title": "JWT rejections by reason",
-      "targets": [
-        {
-          "expr": "sum by (reason) (increase(jwt_tokens_rejected_total[$__range]))",
-          "legendFormat": "{{reason}}",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 12,
-        "y": 86
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "min": 0,
-          "custom": {
-            "axisPlacement": "auto",
-            "axisLabel": "",
-            "fillOpacity": 80,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineWidth": 1,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "orientation": "horizontal",
-        "xTickLabelRotation": 0,
-        "xTickLabelSpacing": 0,
-        "showValue": "auto",
-        "stacking": {
-          "mode": "none",
-          "group": "A"
-        },
-        "groupWidth": 0.7,
-        "barWidth": 0.97,
-        "barRadius": 0,
-        "fullHighlight": false,
-        "legend": {
-          "displayMode": "list",
-          "placement": "right",
-          "showLegend": true,
-          "calcs": []
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      }
-    },
-    {
       "id": 45,
       "type": "row",
       "title": "External APIs",
@@ -2535,7 +1934,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 93
+        "y": 70
       },
       "panels": []
     },
@@ -2560,7 +1959,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 94
+        "y": 71
       },
       "fieldConfig": {
         "defaults": {
@@ -2629,7 +2028,7 @@
         "h": 7,
         "w": 6,
         "x": 12,
-        "y": 94
+        "y": 71
       },
       "fieldConfig": {
         "defaults": {
@@ -2691,7 +2090,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 94
+        "y": 71
       },
       "fieldConfig": {
         "defaults": {
@@ -2755,7 +2154,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 101
+        "y": 78
       },
       "fieldConfig": {
         "defaults": {
@@ -2801,213 +2200,6 @@
           "mode": "multi",
           "sort": "none"
         }
-      }
-    },
-    {
-      "id": 50,
-      "type": "row",
-      "title": "Database / Repository",
-      "collapsed": false,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 108
-      },
-      "panels": []
-    },
-    {
-      "id": 51,
-      "type": "timeseries",
-      "title": "DB operations / sec",
-      "targets": [
-        {
-          "expr": "sum by (operation) (rate(repo_queries_total[5m]))",
-          "legendFormat": "{{operation}}",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 7,
-        "w": 16,
-        "x": 0,
-        "y": 109
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "min": 0,
-          "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "opacity",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "smooth",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": [
-            "mean",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      }
-    },
-    {
-      "id": 52,
-      "type": "stat",
-      "title": "DB errors",
-      "targets": [
-        {
-          "expr": "sum(increase(repo_queries_total{result=\"error\"}[$__range]))",
-          "legendFormat": "errors",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 16,
-        "y": 109
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {}
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          },
-          {
-            "color": "red",
-            "value": 1
-          }
-        ]
-      }
-    },
-    {
-      "id": 53,
-      "type": "stat",
-      "title": "DB p95 latency",
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(repo_query_duration_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "p95",
-          "refId": "A",
-          "instant": false,
-          "format": "time_series",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          }
-        }
-      ],
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 20,
-        "y": 109
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "min": 0,
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {},
-          "decimals": 3
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "values": false,
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": ""
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "thresholds": {
-        "mode": "absolute",
-        "steps": [
-          {
-            "color": "green",
-            "value": null
-          }
-        ]
       }
     },
     {
@@ -3019,7 +2211,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 116
+        "y": 85
       },
       "panels": []
     },
@@ -3044,7 +2236,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 117
+        "y": 86
       },
       "fieldConfig": {
         "defaults": {
@@ -3113,7 +2305,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 117
+        "y": 86
       },
       "fieldConfig": {
         "defaults": {
@@ -3182,7 +2374,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 117
+        "y": 86
       },
       "fieldConfig": {
         "defaults": {
@@ -3234,8 +2426,7 @@
   "refresh": "30s",
   "schemaVersion": 40,
   "tags": [
-    "whatsapp",
-    "bot",
+    "claudeai-api",
     "go",
     "operations"
   ],
@@ -3273,19 +2464,22 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(whatsapp_commands_total, command)",
+        "definition": "label_values(claude_runs_total, model)",
         "hide": 0,
         "includeAll": true,
-        "label": "Command",
+        "allValue": ".*",
+        "label": "Model",
         "multi": true,
-        "name": "command",
+        "name": "model",
         "options": [],
         "query": {
-          "query": "label_values(whatsapp_commands_total, command)",
-          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+          "query": "label_values(claude_runs_total, model)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery",
+          "qryType": 1
         },
-        "refresh": 1,
+        "refresh": 2,
         "regex": "",
+        "skipUrlSync": false,
         "sort": 1,
         "type": "query"
       },
@@ -3342,8 +2536,8 @@
     ]
   },
   "timezone": "Europe/Madrid",
-  "title": "WhatsApp Bot - Operations Overview",
-  "uid": "whatsappbot-ops",
+  "title": "claudeai-api - Operations Overview",
+  "uid": "claudeai-api-ops",
   "version": 1,
   "weekStart": ""
 }

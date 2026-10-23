@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/config"
-	"github.com/martinezsaweczko/whatsappBot-golang/http/middleware"
-	"github.com/martinezsaweczko/whatsappBot-golang/model"
-	"github.com/martinezsaweczko/whatsappBot-golang/o11"
+	"github.com/martinezsaweczko/claudeai-api/config"
+	"github.com/martinezsaweczko/claudeai-api/http/middleware"
+	"github.com/martinezsaweczko/claudeai-api/model"
+	"github.com/martinezsaweczko/claudeai-api/o11"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -77,7 +77,7 @@ func (v *VersionHandler) RegisterRoutes(router Router, middlewares ...middleware
 //	@Router       /api/v1/version [get]
 func (v *VersionHandler) getVersion(w http.ResponseWriter, r *http.Request) {
 
-	v.log.Info("Received request for version information")
+	v.log.InfoContext(r.Context(), "Received request for version information")
 
 	_, span := v.observability.Trace.Tracer("http/handlers/version").Start(r.Context(), "handler.GetVersion")
 	defer span.End()
@@ -90,7 +90,7 @@ func (v *VersionHandler) getVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	err := json.NewEncoder(w).Encode(versionInfo)
 	if err != nil {
-		v.log.Error("Failed to encode version information", "error", err)
+		v.log.ErrorContext(r.Context(), "Failed to encode version information", "error", err)
 		v.handlerCalls.Add(r.Context(), 1, metric.WithAttributes(
 			attribute.String("method", "GET")),
 			metric.WithAttributes(attribute.Int("http_code", http.StatusInternalServerError)),

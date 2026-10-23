@@ -2,12 +2,14 @@ package http_server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/http/middleware"
+	"github.com/martinezsaweczko/claudeai-api/http/middleware"
 )
 
 // Server wraps the standard net/http server implementation
@@ -44,16 +46,24 @@ func (h *HTTPServerConfig) New() *HTTPServer {
 	}
 }
 
-// Start starts the HTTP server
+// Start binds the listen address synchronously and serves in the background.
+// A bind failure is returned to the caller; errors from the serve loop after a
+// successful bind are logged.
 func (s *HTTPServer) Start() error {
 	s.log.Info("Starting HTTP server", "address", s.httpServer.Addr, "timeout", s.httpServer.IdleTimeout, "read_timeout", s.httpServer.ReadTimeout, "write_timeout", s.httpServer.WriteTimeout)
+
+	listener, err := net.Listen("tcp", s.httpServer.Addr)
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", s.httpServer.Addr, err)
+	}
+
 	go func() {
-		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := s.httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			s.log.Error("Server error", "error", err)
 		}
 	}()
 
-	s.log.Info("HTTP server started", "address", s.httpServer.Addr, "timeout", s.httpServer.IdleTimeout, "read_timeout", s.httpServer.ReadTimeout, "write_timeout", s.httpServer.WriteTimeout)
+	s.log.Info("HTTP server started", "address", s.httpServer.Addr)
 	return nil
 }
 

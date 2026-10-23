@@ -20,32 +20,32 @@ func withCommandLine(t *testing.T, args ...string) {
 		os.Args = prevArgs
 	})
 
-	fs := flag.NewFlagSet("whatsappbot-test", flag.ContinueOnError)
+	fs := flag.NewFlagSet("claudeai-api-test", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	flag.CommandLine = fs
-	os.Args = append([]string{"whatsappbot-test"}, args...)
+	os.Args = append([]string{"claudeai-api-test"}, args...)
 }
 
 func TestLoadConfig(t *testing.T) {
-	publicPath, privatePath := writeKeyPair(t, t.TempDir(), testRSAKey(t))
-	keyFlags := []string{"-jwt-public-key-path", publicPath, "-jwt-private-key-path", privatePath}
-
-	t.Run("required flags plus defaults", func(t *testing.T) {
-		withCommandLine(t, append(keyFlags,
-			"-bot-number", "34936674253",
-			"-bot-notification-jid", "34645568517@c.us",
-		)...)
+	t.Run("defaults", func(t *testing.T) {
+		withCommandLine(t)
 
 		cfg, cfgErr := LoadConfig()
 		if cfgErr != nil {
 			t.Fatalf("LoadConfig failed: %v", cfgErr)
 		}
 
-		if cfg.Bot.BotNumber != "34936674253" || cfg.Bot.ToNotification != "34645568517@c.us" {
-			t.Errorf("bot identity not taken from flags: %+v", cfg.Bot)
+		if cfg.HttpServer.Port != 46564 {
+			t.Errorf("default port = %d, want 46564", cfg.HttpServer.Port)
 		}
-		if cfg.HttpServer.Port != 46564 || cfg.InternalServer.Port != 9000 {
-			t.Errorf("default ports = %d/%d, want 46564/9000", cfg.HttpServer.Port, cfg.InternalServer.Port)
+		// Secure by default: the single server listens on loopback unless told
+		// otherwise (the container passes 0.0.0.0 explicitly).
+		if cfg.HttpServer.Address != "127.0.0.1" {
+			t.Errorf("default address = %q, want 127.0.0.1", cfg.HttpServer.Address)
+		}
+		// Streaming responses need the write timeout disabled by default.
+		if cfg.HttpServer.WriteTimeout != 0 {
+			t.Errorf("write timeout = %d, want 0 (disabled for SSE)", cfg.HttpServer.WriteTimeout)
 		}
 		if cfg.Log.Level != "info" || cfg.Log.FilePath != "stdout" {
 			t.Errorf("default log config = %+v", cfg.Log)
@@ -53,68 +53,64 @@ func TestLoadConfig(t *testing.T) {
 		if cfg.O11.PrometheusPath != "/metrics" || cfg.O11.Environment != "dev" || cfg.O11.TracerEndpoint != "" {
 			t.Errorf("default o11 config = %+v", cfg.O11)
 		}
-		if cfg.Bot.DBDriver != "sqlite" || cfg.Bot.DatabaseDSN() != "file:/tmp/db.sqlite?_foreign_keys=on" {
-			t.Errorf("default database = %s %s", cfg.Bot.DBDriver, cfg.Bot.DatabaseDSN())
-		}
-		if cfg.Bot.CommandTimeout != 60 || cfg.Bot.SchedulerTimezone != "Europe/Madrid" || !cfg.Bot.SchedulerEnabled {
-			t.Errorf("unexpected bot defaults: %+v", cfg.Bot)
-		}
-		if cfg.Bot.TrollNumbers != nil {
-			t.Errorf("troll numbers should default to nil, got %v", cfg.Bot.TrollNumbers)
-		}
-		if cfg.JWT.PrivateKey == nil || cfg.JWT.PublicKey == nil {
-			t.Error("JWT keys should be loaded")
-		}
 	})
 
 	t.Run("flags override defaults", func(t *testing.T) {
-		withCommandLine(t, append(keyFlags,
-			"-bot-number", "34936674253",
-			"-bot-notification-jid", "34645568517@c.us",
+		withCommandLine(t,
 			"-http-port", "8080",
-			"-internal-port", "9100",
 			"-http-read-timeout", "7",
+			"-http-write-timeout", "45",
 			"-log-level", "debug",
-			"-bot-troll-numbers", "a@c.us, b@c.us",
-			"-scheduler-enabled=false",
-			"-db-driver", "mysql",
-			"-db-dsn", "user:pass@tcp(db:3306)/bot",
-		)...)
+		)
 
 		cfg, cfgErr := LoadConfig()
 		if cfgErr != nil {
 			t.Fatalf("LoadConfig failed: %v", cfgErr)
 		}
 
-		if cfg.HttpServer.Port != 8080 || cfg.InternalServer.Port != 9100 {
-			t.Errorf("ports = %d/%d, want 8080/9100", cfg.HttpServer.Port, cfg.InternalServer.Port)
+		if cfg.HttpServer.Port != 8080 {
+			t.Errorf("port = %d, want 8080", cfg.HttpServer.Port)
 		}
-		// The internal server has no timeout flags of its own: it shares the public ones.
-		if cfg.HttpServer.ReadTimeout != 7 || cfg.InternalServer.ReadTimeout != 7 {
-			t.Errorf("read timeouts = %d/%d, want 7/7", cfg.HttpServer.ReadTimeout, cfg.InternalServer.ReadTimeout)
+		if cfg.HttpServer.ReadTimeout != 7 {
+			t.Errorf("read timeout = %d, want 7", cfg.HttpServer.ReadTimeout)
+		}
+		if cfg.HttpServer.WriteTimeout != 45 {
+			t.Errorf("write timeout = %d, want 45", cfg.HttpServer.WriteTimeout)
 		}
 		if cfg.Log.Level != "debug" {
 			t.Errorf("log level = %q, want debug", cfg.Log.Level)
 		}
-		if got := cfg.Bot.TrollNumbers; len(got) != 2 || got[0] != "a@c.us" || got[1] != "b@c.us" {
-			t.Errorf("troll numbers = %v, want [a@c.us b@c.us]", got)
+	})
+
+	t.Run("the internal server flags are gone", func(t *testing.T) {
+		withCommandLine(t)
+		if _, cfgErr := LoadConfig(); cfgErr != nil {
+			t.Fatalf("LoadConfig failed: %v", cfgErr)
 		}
-		if cfg.Bot.SchedulerEnabled {
-			t.Error("scheduler should be disabled by the flag")
+		for _, name := range []string{"internal-address", "internal-port"} {
+			if flag.Lookup(name) != nil {
+				t.Errorf("flag -%s is still defined: there is one server and one port", name)
+			}
 		}
-		if cfg.Bot.DatabaseDSN() != "user:pass@tcp(db:3306)/bot" {
-			t.Errorf("DSN = %q, want the mysql DSN", cfg.Bot.DatabaseDSN())
+		// The real binary uses ExitOnError, so passing a removed flag aborts
+		// startup with "flag provided but not defined"; check that on a fresh set.
+		fs := flag.NewFlagSet("claudeai-api-test", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		flag.CommandLine = fs
+		os.Args = []string{"claudeai-api-test"}
+		if _, cfgErr := LoadConfig(); cfgErr != nil {
+			t.Fatalf("LoadConfig failed: %v", cfgErr)
+		}
+		if err := fs.Parse([]string{"-internal-port", "9100"}); err == nil || !strings.Contains(err.Error(), "not defined") {
+			t.Errorf("-internal-port parse error = %v, want 'flag provided but not defined'", err)
 		}
 	})
 
 	t.Run("every invalid section is reported together", func(t *testing.T) {
-		// No bot flags, an out-of-range port, a bad log level, an http tracer
-		// endpoint and missing key files.
 		withCommandLine(t,
 			"-http-port", "70000",
 			"-log-level", "loud",
 			"-o11-tracer-endpoint", "http://tempo:4317",
-			"-jwt-public-key-path", "/nonexistent/public.pem",
 		)
 
 		cfg, cfgErr := LoadConfig()
@@ -124,15 +120,13 @@ func TestLoadConfig(t *testing.T) {
 		if cfg != nil {
 			t.Error("no config should be returned alongside an error")
 		}
-		if len(cfgErr.AppendedErrors) != 5 {
-			t.Errorf("got %d appended errors, want 5: %v", len(cfgErr.AppendedErrors), cfgErr)
+		if len(cfgErr.AppendedErrors) != 3 {
+			t.Errorf("got %d appended errors, want 3: %v", len(cfgErr.AppendedErrors), cfgErr)
 		}
 		for _, want := range []string{
 			"server port must be between 1 and 65535",
 			"invalid log level: loud",
 			"tracer endpoint should not start with http://",
-			"JWT public key file not found",
-			"bot number cannot be empty",
 		} {
 			if !strings.Contains(cfgErr.Error(), want) {
 				t.Errorf("error should report %q, got:\n%s", want, cfgErr)

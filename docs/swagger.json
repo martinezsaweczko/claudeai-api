@@ -1,8 +1,8 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "HTTP API for the WhatsApp newspaper kiosk bot.",
-        "title": "WhatsApp Bot API",
+        "description": "OpenAI-compatible HTTP API backed by the Claude Code CLI. One server, one port: /v1/*, /metrics and /api/v1/skills* require the API key when CLAUDEAI_API_KEYS is set; /api/v1/health, /api/v1/version and this documentation are always public.",
+        "title": "Claude OpenAI-compatible API",
         "contact": {},
         "license": {
             "name": "MIT"
@@ -10,46 +10,6 @@
         "version": "1.0.0"
     },
     "paths": {
-        "/api/v1/file": {
-            "post": {
-                "description": "Notifies all subscribers whose subscription text matches the provided filename.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Quiosk"
-                ],
-                "summary": "Trigger subscription notifications",
-                "parameters": [
-                    {
-                        "description": "Subscription trigger",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.triggerRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.statusResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.statusResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/health": {
             "get": {
                 "description": "Returns the current health status of the application.",
@@ -73,161 +33,58 @@
                 }
             }
         },
-        "/api/v1/notifications": {
-            "post": {
-                "description": "Sends a plain text message to the given WhatsApp recipient.",
-                "consumes": [
-                    "application/json"
-                ],
+        "/api/v1/skills": {
+            "get": {
+                "description": "Lists the skills of the current snapshot and the health of the sync. Returns `{\"enabled\":false}` when no skills repository is configured. Requires the API key when CLAUDEAI_API_KEYS is set.",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "Whatsapp"
+                    "Skills"
                 ],
-                "summary": "Send a WhatsApp notification",
-                "parameters": [
-                    {
-                        "description": "Notification",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
+                "summary": "Skills status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.notificationRequest"
+                            "$ref": "#/definitions/handlers.skillsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
                         }
                     }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/skills/refresh": {
+            "post": {
+                "description": "Asks the background syncer to sync now (non-blocking, coalesced) and returns 202. Poll `GET /api/v1/skills` for the result. 404 `skills_disabled` when no skills repository is configured. Requires the API key when CLAUDEAI_API_KEYS is set.",
+                "produces": [
+                    "application/json"
                 ],
+                "tags": [
+                    "Skills"
+                ],
+                "summary": "Trigger a skills sync",
                 "responses": {
                     "202": {
                         "description": "Accepted",
                         "schema": {
-                            "$ref": "#/definitions/handlers.notificationResponse"
+                            "$ref": "#/definitions/handlers.skillsRefreshResponse"
                         }
                     },
-                    "400": {
-                        "description": "Bad Request",
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/scheduler": {
-            "get": {
-                "description": "Returns all scheduled commands.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Scheduler"
-                ],
-                "summary": "List scheduled commands",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/handlers.scheduledCommandResponse"
-                            }
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "description": "Schedules a WhatsApp command to run automatically in a group using a cron expression.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Scheduler"
-                ],
-                "summary": "Create a scheduled command",
-                "parameters": [
-                    {
-                        "description": "Scheduled command",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.createScheduleRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.scheduledCommandResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/scheduler/{id}": {
-            "put": {
-                "description": "Replaces the name, cron expression, command, group and enabled flag of a scheduled command, keeping its ID. The new schedule takes effect immediately. Omitting enabled sets it to true.",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Scheduler"
-                ],
-                "summary": "Update a scheduled command",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Schedule UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "Scheduled command",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.updateScheduleRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.scheduledCommandResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
                         }
                     },
                     "404": {
@@ -235,53 +92,13 @@
                         "schema": {
                             "$ref": "#/definitions/handlers.errorResponse"
                         }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
                     }
-                }
-            },
-            "delete": {
-                "description": "Removes a scheduled command by ID.",
-                "tags": [
-                    "Scheduler"
-                ],
-                "summary": "Delete a scheduled command",
-                "parameters": [
+                },
+                "security": [
                     {
-                        "type": "string",
-                        "description": "Schedule UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
+                        "BearerAuth": []
                     }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    }
-                }
+                ]
             }
         },
         "/api/v1/version": {
@@ -307,169 +124,6 @@
                 }
             }
         },
-        "/api/v1/whatsapp/groups": {
-            "get": {
-                "description": "Returns the WhatsApp groups the bot is participating in.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Whatsapp"
-                ],
-                "summary": "List WhatsApp groups",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/handlers.groupResponse"
-                            }
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/whatsapp/groups/{jid}/participants": {
-            "get": {
-                "description": "Returns the participants of the given WhatsApp group.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Whatsapp"
-                ],
-                "summary": "List group participants",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Group JID",
-                        "name": "jid",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/handlers.participantResponse"
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    },
-                    "502": {
-                        "description": "Bad Gateway",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/internacional_folder/{file}": {
-            "get": {
-                "description": "Downloads a file from the configured kiosk folder. Requires a valid JWT token passed as the access_token query parameter.",
-                "tags": [
-                    "Quiosk"
-                ],
-                "summary": "Download a kiosk file",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "File name",
-                        "name": "file",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "JWT token",
-                        "name": "access_token",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "File content",
-                        "schema": {
-                            "type": "file"
-                        }
-                    },
-                    "401": {
-                        "description": "Missing or invalid JWT token",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "File not found",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
-        "/magazine_folder/{file}": {
-            "get": {
-                "description": "Downloads a file from the configured kiosk folder. Requires a valid JWT token passed as the access_token query parameter.",
-                "tags": [
-                    "Quiosk"
-                ],
-                "summary": "Download a kiosk file",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "File name",
-                        "name": "file",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "JWT token",
-                        "name": "access_token",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "File content",
-                        "schema": {
-                            "type": "file"
-                        }
-                    },
-                    "401": {
-                        "description": "Missing or invalid JWT token",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "File not found",
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                }
-            }
-        },
         "/metrics": {
             "get": {
                 "description": "Exposes Prometheus-compatible metrics.",
@@ -486,71 +140,297 @@
                         "schema": {
                             "type": "string"
                         }
+                    },
+                    "401": {
+                        "description": "Missing or invalid API key (only when CLAUDEAI_API_KEYS is set)",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
-        "/nacional_folder/{file}": {
-            "get": {
-                "description": "Downloads a file from the configured kiosk folder. Requires a valid JWT token passed as the access_token query parameter.",
-                "tags": [
-                    "Quiosk"
+        "/v1/chat/completions": {
+            "post": {
+                "description": "OpenAI-compatible chat completion backed by the Claude Code CLI. With stream true the response is a text/event-stream of chat.completion.chunk events ending with data: [DONE].\nUsed fields: model (empty uses the server default), messages (string or text-part content; roles system, developer, user, assistant), stream (SSE when true), stream_options.include_usage (final usage chunk).\nIgnored without error: temperature, top_p, max_tokens, max_completion_tokens, stop, presence_penalty, frequency_penalty, seed, user, response_format, logit_bias, metadata.\nRejected with 400: tools/functions/tool_calls/function_call and tool or function roles (unsupported_parameter), n \u003e 1 (unsupported_parameter), non-text content parts (unsupported_content_type).",
+                "consumes": [
+                    "application/json"
                 ],
-                "summary": "Download a kiosk file",
+                "produces": [
+                    "application/json",
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "OpenAI"
+                ],
+                "summary": "Create a chat completion",
+                "parameters": [
+                    {
+                        "description": "Chat completion request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.chatRequestDoc"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.chatCompletion"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "model_not_found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "413": {
+                        "description": "request_too_large",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "429": {
+                        "description": "rate_limit_exceeded or server_busy",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "upstream_error or upstream_auth_error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "504": {
+                        "description": "upstream_timeout",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/models": {
+            "get": {
+                "description": "OpenAI-compatible model list. The ids come from the -claude-models flag; `created` is the process start time.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OpenAI"
+                ],
+                "summary": "List models",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.modelList"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/models/{model}": {
+            "get": {
+                "description": "Returns one advertised model, or 404 `model_not_found`.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OpenAI"
+                ],
+                "summary": "Retrieve a model",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "File name",
-                        "name": "file",
+                        "description": "Model id",
+                        "name": "model",
                         "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "JWT token",
-                        "name": "access_token",
-                        "in": "query",
                         "required": true
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "File content",
+                        "description": "OK",
                         "schema": {
-                            "type": "file"
+                            "$ref": "#/definitions/handlers.modelObject"
                         }
                     },
                     "401": {
-                        "description": "Missing or invalid JWT token",
+                        "description": "Unauthorized",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
                         }
                     },
                     "404": {
-                        "description": "File not found",
+                        "description": "Not Found",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         }
     },
     "definitions": {
-        "handlers.createScheduleRequest": {
+        "handlers.chatChoice": {
             "type": "object",
             "properties": {
-                "command": {
+                "finish_reason": {
+                    "type": "string",
+                    "enum": [
+                        "stop",
+                        "length"
+                    ],
+                    "example": "stop"
+                },
+                "index": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "message": {
+                    "$ref": "#/definitions/handlers.chatReplyMessage"
+                }
+            }
+        },
+        "handlers.chatCompletion": {
+            "type": "object",
+            "properties": {
+                "choices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.chatChoice"
+                    }
+                },
+                "created": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "chatcmpl-0123456789abcdef01234567"
+                },
+                "model": {
                     "type": "string"
                 },
-                "group_jid": {
+                "object": {
+                    "type": "string",
+                    "example": "chat.completion"
+                },
+                "usage": {
+                    "$ref": "#/definitions/handlers.chatUsage"
+                }
+            }
+        },
+        "handlers.chatMessageDoc": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "example": "Reply with the single word OK"
+                },
+                "role": {
+                    "type": "string",
+                    "enum": [
+                        "system",
+                        "developer",
+                        "user",
+                        "assistant"
+                    ],
+                    "example": "user"
+                }
+            }
+        },
+        "handlers.chatReplyMessage": {
+            "type": "object",
+            "properties": {
+                "content": {
                     "type": "string"
                 },
-                "name": {
-                    "type": "string"
+                "role": {
+                    "type": "string",
+                    "example": "assistant"
+                }
+            }
+        },
+        "handlers.chatRequestDoc": {
+            "type": "object",
+            "properties": {
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.chatMessageDoc"
+                    }
                 },
-                "schedule": {
-                    "type": "string"
+                "model": {
+                    "type": "string",
+                    "example": "haiku"
+                },
+                "stream": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
+        "handlers.chatUsage": {
+            "type": "object",
+            "properties": {
+                "completion_tokens": {
+                    "type": "integer"
+                },
+                "prompt_tokens": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
                 }
             }
         },
@@ -562,120 +442,152 @@
                 }
             }
         },
-        "handlers.groupResponse": {
+        "handlers.modelList": {
             "type": "object",
             "properties": {
-                "jid": {
-                    "type": "string"
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.modelObject"
+                    }
                 },
-                "name": {
-                    "type": "string"
+                "object": {
+                    "type": "string",
+                    "example": "list"
                 }
             }
         },
-        "handlers.notificationRequest": {
+        "handlers.modelObject": {
             "type": "object",
             "properties": {
+                "created": {
+                    "type": "integer",
+                    "example": 1700000000
+                },
+                "id": {
+                    "type": "string",
+                    "example": "sonnet"
+                },
+                "object": {
+                    "type": "string",
+                    "example": "model"
+                },
+                "owned_by": {
+                    "type": "string",
+                    "example": "anthropic"
+                }
+            }
+        },
+        "handlers.openAIErrorDetailDoc": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
                 "message": {
                     "type": "string"
                 },
-                "recipient": {
+                "param": {
+                    "type": "string"
+                },
+                "type": {
                     "type": "string"
                 }
             }
         },
-        "handlers.notificationResponse": {
+        "handlers.openAIErrorDoc": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/handlers.openAIErrorDetailDoc"
+                }
+            }
+        },
+        "handlers.skillItem": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "summarize"
+                },
+                "plugin": {
+                    "type": "string",
+                    "example": "core-skills"
+                }
+            }
+        },
+        "handlers.skillsRefreshResponse": {
             "type": "object",
             "properties": {
                 "status": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "triggered"
                 }
             }
         },
-        "handlers.participantResponse": {
+        "handlers.skillsResponse": {
             "type": "object",
             "properties": {
-                "display_name": {
-                    "type": "string"
-                },
-                "is_admin": {
-                    "type": "boolean"
-                },
-                "is_super_admin": {
-                    "type": "boolean"
-                },
-                "jid": {
-                    "type": "string"
-                },
-                "phone_number": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.scheduledCommandResponse": {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string"
-                },
-                "created_at": {
+                "commit": {
                     "type": "string"
                 },
                 "enabled": {
                     "type": "boolean"
                 },
-                "group_jid": {
+                "ref": {
                     "type": "string"
                 },
-                "id": {
+                "repo": {
                     "type": "string"
                 },
-                "name": {
-                    "type": "string"
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.skillItem"
+                    }
                 },
-                "schedule": {
-                    "type": "string"
+                "skipped": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.skippedItem"
+                    }
                 },
-                "updated_at": {
+                "sync": {
+                    "$ref": "#/definitions/handlers.skillsSyncStatus"
+                },
+                "synced_at": {
                     "type": "string"
                 }
             }
         },
-        "handlers.statusResponse": {
+        "handlers.skillsSyncStatus": {
             "type": "object",
             "properties": {
-                "status": {
+                "consecutive_failures": {
+                    "type": "integer"
+                },
+                "last_attempt": {
+                    "type": "string"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "last_success": {
                     "type": "string"
                 }
             }
         },
-        "handlers.triggerRequest": {
+        "handlers.skippedItem": {
             "type": "object",
             "properties": {
-                "category": {
-                    "type": "string"
+                "path": {
+                    "type": "string",
+                    "example": "plugins/x/skills/bad"
                 },
-                "file": {
-                    "type": "string"
-                }
-            }
-        },
-        "handlers.updateScheduleRequest": {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string"
-                },
-                "enabled": {
-                    "type": "boolean"
-                },
-                "group_jid": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "schedule": {
+                "reason": {
                     "type": "string"
                 }
             }
@@ -704,6 +616,14 @@
                     "type": "string"
                 }
             }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "\"Bearer \u003ckey\u003e\". Only enforced when CLAUDEAI_API_KEYS is set.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
         }
     }
 }

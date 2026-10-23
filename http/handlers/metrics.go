@@ -4,9 +4,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/config"
-	"github.com/martinezsaweczko/whatsappBot-golang/http/middleware"
-	"github.com/martinezsaweczko/whatsappBot-golang/o11"
+	"github.com/martinezsaweczko/claudeai-api/config"
+	"github.com/martinezsaweczko/claudeai-api/http/middleware"
+	"github.com/martinezsaweczko/claudeai-api/o11"
 )
 
 // Handler is an alias for http.Handler
@@ -42,8 +42,10 @@ func (m *MetricsHandlerConfig) NewMetricsHandler() *MetricsHandler {
 //	@Summary      Prometheus metrics
 //	@Description  Exposes Prometheus-compatible metrics.
 //	@Tags         System
+//	@Security     BearerAuth
 //	@Produce      plain
 //	@Success      200 {string} string "Prometheus metrics text"
+//	@Failure      401 {object} openAIErrorDoc "Missing or invalid API key (only when CLAUDEAI_API_KEYS is set)"
 //	@Router       /metrics [get]
 func swaggerMetricsDocs() {}
 

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/o11"
+	"github.com/martinezsaweczko/claudeai-api/o11"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/metric/noop"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"

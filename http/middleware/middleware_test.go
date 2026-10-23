@@ -3,18 +3,15 @@ package middleware
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/o11"
-	"github.com/martinezsaweczko/whatsappBot-golang/services"
+	"github.com/martinezsaweczko/claudeai-api/o11"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -87,75 +84,6 @@ func TestChainMiddlewareCanShortCircuit(t *testing.T) {
 	}
 	if reached || len(calls) != 0 {
 		t.Errorf("nothing after the outer middleware should run (handler=%v, inner=%v)", reached, calls)
-	}
-}
-
-func TestAuthorizationMiddleware(t *testing.T) {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("failed to generate key: %v", err)
-	}
-	otherKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("failed to generate key: %v", err)
-	}
-	jwtService := services.NewJWTService(key, &key.PublicKey, "whatsappbot-test", time.Minute)
-
-	valid, err := jwtService.GenerateToken("download")
-	if err != nil {
-		t.Fatalf("failed to generate token: %v", err)
-	}
-	expired, err := jwtService.GenerateTokenWithExpiry("download", -time.Minute)
-	if err != nil {
-		t.Fatalf("failed to generate token: %v", err)
-	}
-	foreign, err := services.NewJWTService(otherKey, &otherKey.PublicKey, "whatsappbot-test", time.Minute).GenerateToken("download")
-	if err != nil {
-		t.Fatalf("failed to generate token: %v", err)
-	}
-
-	tests := []struct {
-		name       string
-		header     string
-		wantStatus int
-		wantBody   string
-	}{
-		{"valid bearer token", "Bearer " + valid, http.StatusOK, "protected"},
-		{"missing header", "", http.StatusUnauthorized, "missing authorization header"},
-		{"token without scheme", valid, http.StatusUnauthorized, "invalid authorization header format"},
-		{"wrong scheme", "Basic " + valid, http.StatusUnauthorized, "invalid authorization header format"},
-		{"scheme is case sensitive", "bearer " + valid, http.StatusUnauthorized, "invalid authorization header format"},
-		{"malformed token", "Bearer not-a-jwt", http.StatusUnauthorized, "invalid token"},
-		{"expired token", "Bearer " + expired, http.StatusUnauthorized, "invalid token"},
-		{"token signed by another key", "Bearer " + foreign, http.StatusUnauthorized, "invalid token"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			reached := false
-			next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				reached = true
-				_, _ = w.Write([]byte("protected"))
-			})
-			handler := AuthorizationMiddleware(testLogger(), jwtService)(next)
-
-			req := httptest.NewRequest(http.MethodGet, "/private", nil)
-			if tt.header != "" {
-				req.Header.Set("Authorization", tt.header)
-			}
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-
-			if rec.Code != tt.wantStatus {
-				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
-			}
-			if !strings.Contains(rec.Body.String(), tt.wantBody) {
-				t.Errorf("body = %q, want it to contain %q", rec.Body.String(), tt.wantBody)
-			}
-			if wantReached := tt.wantStatus == http.StatusOK; reached != wantReached {
-				t.Errorf("next handler reached = %v, want %v", reached, wantReached)
-			}
-		})
 	}
 }
 
@@ -350,4 +278,57 @@ func TestTracingMiddlewareNamesSpansAfterTheRoute(t *testing.T) {
 			t.Errorf("span %d name = %q, want %q", i, got, want)
 		}
 	}
+}
+
+func TestWrappedResponseWriterSupportsStreaming(t *testing.T) {
+	t.Run("Flush reaches the underlying flusher", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		wrapped := &wrappedResponseWriter{ResponseWriter: rec, statusCode: http.StatusOK}
+
+		if err := http.NewResponseController(wrapped).Flush(); err != nil {
+			t.Fatalf("Flush through the response controller = %v, want nil", err)
+		}
+		if !rec.Flushed {
+			t.Error("the underlying recorder was not flushed")
+		}
+
+		flusher, ok := any(wrapped).(http.Flusher)
+		if !ok {
+			t.Fatal("wrapped writer does not implement http.Flusher")
+		}
+		rec.Flushed = false
+		flusher.Flush()
+		if !rec.Flushed {
+			t.Error("Flush did not delegate to the underlying writer")
+		}
+	})
+
+	t.Run("Unwrap returns the underlying writer", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		wrapped := &wrappedResponseWriter{ResponseWriter: rec}
+
+		u, ok := any(wrapped).(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			t.Fatal("wrapped writer does not implement Unwrap() http.ResponseWriter")
+		}
+		if u.Unwrap() != http.ResponseWriter(rec) {
+			t.Error("Unwrap did not return the underlying writer")
+		}
+	})
+
+	t.Run("Flush without a flusher is a no-op", func(t *testing.T) {
+		wrapped := &wrappedResponseWriter{ResponseWriter: noFlushWriter{httptest.NewRecorder()}}
+		wrapped.Flush() // must not panic
+	})
+}
+
+// noFlushWriter hides the Flush method of the embedded recorder.
+type noFlushWriter struct{ rw http.ResponseWriter }
+
+func (w noFlushWriter) Header() http.Header         { return w.rw.Header() }
+func (w noFlushWriter) Write(b []byte) (int, error) { return w.rw.Write(b) }
+func (w noFlushWriter) WriteHeader(code int)        { w.rw.WriteHeader(code) }
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }

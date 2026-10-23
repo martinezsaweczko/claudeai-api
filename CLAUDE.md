@@ -4,95 +4,56 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 @AGENTS.md
 
-AGENTS.md (imported above) holds the architecture rules, observability requirements, testing conventions and CI/release notes. This file adds only what it does not cover, plus corrections where the code has moved on.
+AGENTS.md (imported above) holds the architecture rules, observability requirements, testing conventions and CI/release notes. This file adds only what it does not cover.
 
 ## Commands
 
 ```bash
-go run ./cmd -bot-number <number> -bot-notification-jid <jid>   # run locally (the only two required flags)
-go test ./whatsapp -run TestFirstMatchWins -race -count=1        # single test
-go test ./services/kiosk/...                                     # single package
-make test                                                        # go test -race -count=1 ./...
-make coverage                                                    # same suite + coverage.out (docs/ excluded), prints the total
-make coverage-total                                              # bare number from an existing coverage.out
-make swagger                                                     # regenerate docs/ after changing handler annotations
-make check-swagger                                               # what CI runs: fails if docs/ is stale
-make vulncheck                                                   # govulncheck ./...
-make ci                                                          # the CI checks locally (all but the container build), without modifying files
+make run                                  # go run ./cmd, loopback only (127.0.0.1:46564)
+go test ./http/middleware -run TestWrapped -race -count=1   # single test
+make test                                 # go test -race -count=1 ./...
+make coverage                             # same suite + coverage.out (docs/ excluded), prints the total
+make swagger                              # regenerate docs/ after changing handler annotations
+make check-swagger                        # what CI runs: fails if docs/ is stale
+make vulncheck                            # govulncheck ./...
+make ci                                   # the CI checks locally (all but the container build), without modifying files
+make container                            # podman build --format docker; make container-run uses ./.env
 ```
 
-Makefile targets that do more than their name suggests:
-
-- `make build` depends on `keys`, which depends on `clean-keys`: it deletes and regenerates `keys/` every time, invalidating all issued download links. Use `go build ./...` or `make binary` to keep existing keys.
 - `make check` runs `go fmt ./...` and `go mod tidy`, so it modifies files.
-- `make run` starts the binary with no flags and fails config validation; use the `go run` line above.
-- `make binary` creates `/tmp/periodico/{nacional,internacional,magazine}`, the default kiosk folders.
-
-Running locally needs `keys/public.pem` and `keys/private.pem` (`make keys`). Defaults: public server on `:46564`, internal server on `:9000`. On first run (no session in `-session-db-path`) the client prints a QR code to stdout, or requests a pairing code when a pairing phone is configured.
-
-The Go version has one source of truth, the `go` directive in `go.mod`: both workflows read it (`go-version-file`), and a local older Go downloads that toolchain automatically. `govulncheck` also runs weekly on `main` (`.github/workflows/vulncheck.yml`) because new advisories can break CI without any commit; the usual fix is bumping the `go` directive or the flagged module.
-
-Tooling is not pinned beyond `swag` (`tools/tools.go`): the `goose` and `govulncheck` CLIs must be installed separately. There is no golangci-lint config.
-
-### Migrations
-
-- SQL migrations are per driver: `repository/migrations/{sqlite,mysql}/NNN_*.sql`. A schema change needs a file in both directories.
-- Go migrations live in `repository/migrations/*.go`, are shared by both drivers (they detect the dialect at runtime) and are registered by blank import in `repository/repository.go`.
-- Everything is embedded and applied by `goose.Up` at startup inside `repository.New`. `make migrate` / `make migrate-mysql` use the goose CLI against the SQL directory only, so they do not run Go migrations.
+- The Go version has one source of truth, the `go` directive in `go.mod`: both workflows read it (`go-version-file`).
+- `make swagger`/`check-swagger` run the `swag` pinned in `go.mod` via `go run`, so CI installs nothing. Tooling is not pinned beyond `swag` (`tools/tools.go`); `govulncheck` must be installed separately. There is no golangci-lint config.
 
 ## Architecture
 
 ### Startup and shutdown
 
-`cmd/main.go` builds the leaf dependencies in order: `config.LoadConfig` → slog handler wrapped in `o11.NewTraceLogHandler` → `o11.SetupOTelSDK` → `repository.New` (opens the DB and migrates) → `whatsapp.NewClient` → `whatsapp.NewRouter`, then connects them with `waClient.AddEventHandler(router.HandleEvent)`.
+`cmd/main.go` builds the leaf dependencies in order: `config.LoadConfig` -> slog handler wrapped in `o11.NewTraceLogHandler` -> `o11.SetupOTelSDK` -> the single `http_server.HTTPServer`. `App.Run` (`app/app.go`) calls `initAndWire`, starts the server (a bind failure aborts startup) and blocks on SIGINT/SIGTERM; shutdown stops it with a 30s timeout.
 
-`App.Run` (`app/app.go`) calls `initAndWire` (services, HTTP routes, command registration), starts the public and internal HTTP servers, connects WhatsApp, starts the scheduler and blocks on SIGINT/SIGTERM. Shutdown stops the servers (30s), then the scheduler, then waits for in-flight command handlers (`router.Wait()`, unbounded), then disconnects WhatsApp.
+### One HTTP server
 
-`HTTPServer.Start` listens in a goroutine and always returns nil: a port already in use is only logged, the process keeps running.
+- **One server, one port** (`-http-*`, default `127.0.0.1:46564`; the container passes `0.0.0.0`): `/v1/*`, `/metrics`, `/api/v1/{health,version,skills,skills/refresh,docs/}` and a `/docs` redirect on a single mux, so Swagger shares the API origin. Auth class: PUBLIC = health, version, docs; PROTECTED (Bearer when `CLAUDEAI_API_KEYS` is set, open otherwise) = `/v1/*`, `/metrics`, skills status/refresh. The write timeout defaults to 0 (disabled) so SSE streams are not cut; read and idle timeouts still apply. The old `-internal-*` flags were removed.
 
-### Incoming message path
+### Middleware order
 
-`Router.HandleEvent` → `dispatch` (`whatsapp/router.go`):
+The first middleware listed in `middleware.Chain` is the outermost: tracing -> metrics -> logging -> API-key auth (`middleware.APIKeyAuth`, a pass-through when `CLAUDEAI_API_KEYS` is unset) -> handler. The response-writer wrapper shared by logging and metrics implements `Flush` and `Unwrap`.
 
-1. Messages from the bot itself are dropped.
-2. A document posted in the `-pdf-channel-jid` chat goes to the channel-media handler (`services/channelpdf`) before any command matching.
-3. The first command whose `Pattern` matches the body wins. Order is the registration order in `initAndWire`: kiosk, subscription, tts, weather, imagegen, electricity. Patterns are anchored prefixes, so a new command can be shadowed by an earlier, shorter one.
-4. With no match, the AI fallback (`services/ai`) runs only if the bot is mentioned. The mention check is an exact string compare against `-bot-mentioned-number` and `<bot-number>@c.us`.
+### Claude configuration and secrets
 
-`Router.execute` runs the matched handler in a goroutine with panic recovery, a `-command-timeout` context (default 60s), a `whatsapp.command.<name>` span and command metrics.
+Flags: `-claude-bin` (`claude`), `-claude-model` (`sonnet`), `-claude-models` (`sonnet,opus,haiku`, advertised by `GET /v1/models`), `-claude-timeout` (`5m`), `-claude-max-concurrency` (`4`, >= 1). Secrets use environment variables, not flags: `CLAUDE_CODE_OAUTH_TOKEN` (optional) and `CLAUDEAI_API_KEYS` (optional, comma-separated; unset means no client auth). `initAndWire` builds `app.apiKeyAuth` and logs `api_key_auth=enabled|disabled` plus warnings (unauthenticated on a non-loopback `-http-address`, which is what the container does: the API, metrics and skills refresh are all open on that single port, so publish on `127.0.0.1` only; `ANTHROPIC_API_KEY` set in the environment). The `/v1` routes (`GET /v1/models`, `GET /v1/models/{model}`, `POST /v1/chat/completions`) attach tracing -> metrics -> logging -> `app.apiKeyAuth`; `/metrics` and the skills routes use the same `app.apiKeyAuth` (health, version and Swagger never); see the API section of the README for fields, errors and examples.
 
-### Scheduled command path
+Streaming: `POST /v1/chat/completions` with `stream: true` returns OpenAI `chat.completion.chunk` SSE (`http/handlers/chat_stream.go`): role chunk, one chunk per delta, finish chunk (`stop`/`length`), optional usage chunk when `stream_options.include_usage`, then `data: [DONE]`. Errors before the first delta are JSON (same mapping as non-streaming); after it, one SSE error event then `[DONE]`. Flush per event; client disconnect kills the CLI. Try it with `curl -N`; behind a proxy disable buffering and raise the read timeout (no heartbeat). Rejected as 400: tools/functions, `n` > 1, non-text parts, trailing body data.
 
-The scheduler (`services/scheduler`, robfig/cron, 5-field expressions, only when `-scheduler-enabled`) calls `Router.ExecuteCommand` with a synthetic `IncomingMessage`. This path matches patterns the same way but calls the handler **synchronously and bypasses `execute`**: no timeout, no panic recovery, no command metrics, no WaitGroup tracking, and no AI fallback. Handlers reachable from the scheduler must be safe under those conditions. Jobs are skipped while WhatsApp is disconnected.
+Backend: `services/claude.CLIBackend` (built in `initAndWire` as `app.claude`) runs `claude -p --output-format stream-json` per request with config isolation flags (`--setting-sources ""`, `--strict-mcp-config`, `--disable-slash-commands`); see the package doc in `services/claude/doc.go` for the verified event shapes and flags.
 
-### Two HTTP servers
+Skills: `services/skills` (config `-skills-repo`, `-skills-ref`, `-skills-dir`, `-skills-refresh`, `-skills-ssh-key`, `-skills-known-hosts`, `-skills-sync-timeout`) syncs a private skills repo through the `git` binary. `app/skills.go` builds the syncer when `-skills-repo` is set (misconfiguration such as a missing key file fails startup), runs one bounded (20s) initial `Sync` before the servers start (failure only warns), then `Syncer.Run` in a goroutine that shutdown cancels and waits for (5s). `services/claude.WithSkills(func() (dir, ok))` receives the adapted `Current()`; per run it is called once, and when ok the CLI gets `--tools Skill --setting-sources project`, no `--disable-slash-commands`, cwd = snapshot dir and a fixed system-prompt hint (`skillsHint`); otherwise flags are unchanged. `Result.Text` is the text of all assistant turns joined by a blank line (same for Stream and Complete). Skills endpoints (same port, protected by `app.apiKeyAuth` when keys are set): `GET /api/v1/skills` and `POST /api/v1/skills/refresh` (`http/handlers/skills.go`, consumer interface `handlers.SkillsSource`). Shutdown also calls the backend's `Close` (removes its temp cwd). See the README "Skills" section and `services/skills/doc.go` / `services/claude/doc.go`.
 
-- **Public** (`-http-*`, default `:46564`): only `GET /{nacional,internacional,magazine}_folder/{file}`, behind tracing → metrics → logging → JWT (the first middleware listed is the outermost).
-- **Internal** (default `:9000`, **no authentication**, base path `/api/v1`): health, version, Swagger docs, Prometheus metrics, `POST /file` (triggers subscription notifications), `POST /notifications`, WhatsApp group listing, and `/scheduler` CRUD. It must not be exposed publicly. `/health` always returns ok and does not reflect the WhatsApp connection state.
+### Metrics and traces
 
-### Download tokens
+Web access: `-claude-web none|search|full` (default `search`). `buildArgs` puts WebSearch (search|full) and WebFetch (full) in `--tools` and in `--allowedTools` (both needed, verified; see `services/claude/doc.go`), `composeSystem` appends `skillsHint` then `webHint`, and `none` leaves the arguments identical to the pre-web ones. The parser ignores web tool blocks and counts uses into `Result.WebSearchRequests/WebFetchRequests` and `RunInfo.WebSearches/WebFetches` (-> `claude_web_requests_total{type}` and span attributes `claude.web.search_requests`/`fetch_requests`). `full` logs a WARN: WebFetch runs on the gateway host (SSRF). The `web-research` skill (skills repo) only guides; the flag grants the tool.
 
-`http/middleware/jwt_query.go` reads `?access_token=`, verifies signature and expiry, then counts prior uses in the `jwt_used` table and records this one. Tokens are not bound to a file or category (constant subject), and a use is consumed even when the file turns out not to exist. Kiosk file indices shown to users are positions in a listing recomputed on every request (files within the retention window, newest first), not stable IDs.
+Claude and skills metrics live in `o11/metrics_claude.go` (`NewClaudeMetrics`, `NewSkillsMetrics`, meters `claudeai-api/claude` and `claudeai-api/skills`); `app/metrics.go` adapts `claude.RunInfo` and `skills.SyncInfo` to them and `initAndWire` passes the observers through `claude.WithObserver` / `skills.WithObserver`. Catalog: `claude_runs_total{model,outcome}`, `claude_run_duration_seconds{model}`, `claude_time_to_first_token_seconds{model}`, `claude_queue_wait_seconds{model}`, `claude_runs_in_flight`, `claude_tokens_total{model,type}` (prompt side = input + cache_creation + cache_read, summed over all turns), `claude_cost_usd_total{model}` (CLI estimate, not billing), `claude_skill_invocations_total{skill}`, `claude_web_requests_total{type=search|fetch}`, `skills_sync_total{outcome=success|noop|error}`, `skills_sync_duration_seconds`, and scrape-time gauges `skills_loaded`, `skills_skipped`, `skills_sync_consecutive_failures`, `skills_last_success_timestamp_seconds`, `skills_info{commit,ref}` (current snapshot only). The README "Metrics" section has the full table and bounded label values. These names are the Grafana contract; `o11/metrics_claude_test.go` asserts the exact exposed names. `grafana/dashboard.json` and `grafana/alerts.example.yml` use them; when adding or renaming a metric or label, update the dashboard and keep `go test ./grafana/` green (it scrapes the real instruments and fails on unexposed names or labels).
 
-### Persistence
+Cardinality rule: label values come from bounded sets. `model` = CLI-resolved id, else the requested model only if advertised (`-claude-models` or the default), else `other`; `skill` = loaded skill name or `other`. Never label with a client string. Observers are cheap and panic-safe; both the backend and the syncer work without one.
 
-- `repository.DB` holds the queries; `repository.InstrumentedDB` embeds it and adds spans and metrics. A new repository method is only instrumented if a wrapper is added in `instrumented.go`; otherwise the embedded method is promoted silently.
-- Tables: `subscriptions`, `jwt_used`, `file_usage`, `user_usage`, `scheduled_commands`.
-- Primary keys are UUID v7, stored as TEXT on SQLite and BINARY(16) on MySQL; go through `uuidValue` / `scanUUID`. Dialect-specific SQL branches on `DB.dialect`.
-- SQLite runs with a single open connection.
-
-### Service behaviors worth knowing
-
-- **electricity**: the cache key uses the UTC date, while the "tomorrow's prices" window is 19:00–22:59 Europe/Madrid. A failed fetch writes a marker that blocks refetching for the rest of that day. Charts are drawn by hand with `fogleman/gg` and embedded fonts (no system font dependency).
-- **kiosk**: usage statistics are keyed by the sender's push name, not their JID.
-- **subscription**: a subscription matches when its text is a case-insensitive substring of the new file name.
-- **channelpdf**: saves any document from the configured channel (no MIME check); an already existing file skips both the save and the notification.
-- **tts**: uses the unofficial Google Translate TTS endpoint, Spanish only.
-
-## Where AGENTS.md is out of date
-
-- "Handlers run in goroutines with timeout + recover" holds for real messages only, not for the scheduled path above.
-- `go.mau.fi/whatsmeow/types` is imported beyond `whatsapp` and `app` (config, HTTP handlers, several services). The rule to keep is: the whatsmeow client and events stay inside `whatsapp`.
-- CI also installs `swag` and runs `make check-swagger`, and builds the container with Docker rather than podman.
-- CI runs the tests through `make coverage`, not `make test`. On a push to `main` the `coverage-badge` job force-pushes `coverage.json` as a single commit to the orphan `badges` branch (the only job with `contents: write`); the README badge reads that file.
-- `.github/.copilot-instructions` describes the original template (different module, CGO SQLite driver, env-var config) and should be ignored.
+Trace shape: `otelhttp` server span `POST /v1/chat/completions` -> child `claude.run` (attributes `claude.model`, `claude.model.resolved`, `claude.outcome`, `claude.queue_wait_ms`, `claude.ttft_ms`, `claude.num_turns`, tokens, cost, `claude.skills.active|commit|invoked`; event `first_token`); `skills.sync` is its own trace. Logs on request/run/sync paths use `*Context` slog calls so `trace_id`/`span_id` appear (`o11.TraceLogHandler`). The CLI's own telemetry can be forwarded without code changes: the child inherits the gateway environment, so set `CLAUDE_CODE_ENABLE_TELEMETRY=1` and `OTEL_*` on the gateway process (CLI traces are beta via `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`; keep prompt logging off). It partly duplicates the metrics above.

@@ -10,13 +10,11 @@ import (
 
 	"github.com/gofrs/uuid"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/app"
-	"github.com/martinezsaweczko/whatsappBot-golang/config"
-	"github.com/martinezsaweczko/whatsappBot-golang/http_server"
-	"github.com/martinezsaweczko/whatsappBot-golang/model"
-	"github.com/martinezsaweczko/whatsappBot-golang/o11"
-	"github.com/martinezsaweczko/whatsappBot-golang/repository"
-	"github.com/martinezsaweczko/whatsappBot-golang/whatsapp"
+	"github.com/martinezsaweczko/claudeai-api/app"
+	"github.com/martinezsaweczko/claudeai-api/config"
+	"github.com/martinezsaweczko/claudeai-api/http_server"
+	"github.com/martinezsaweczko/claudeai-api/model"
+	"github.com/martinezsaweczko/claudeai-api/o11"
 )
 
 // Buildinfo variables set via LDFlags in the Makefile
@@ -26,14 +24,19 @@ var (
 	appName   string
 )
 
-// @title WhatsApp Bot API
+// @title Claude OpenAI-compatible API
 // @version 1.0.0
-// @description HTTP API for the WhatsApp newspaper kiosk bot.
+// @description OpenAI-compatible HTTP API backed by the Claude Code CLI. One server, one port: /v1/*, /metrics and /api/v1/skills* require the API key when CLAUDEAI_API_KEYS is set; /api/v1/health, /api/v1/version and this documentation are always public.
 //
 // @license.name MIT
+//
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description "Bearer <key>". Only enforced when CLAUDEAI_API_KEYS is set.
 func main() {
 	// Health check mode for container HEALTHCHECK (slim images have no curl):
-	// whatsappbot -health-check [port]
+	// claudeai-api -health-check [port]
 	if len(os.Args) > 1 && os.Args[1] == "-health-check" {
 		os.Exit(healthCheck())
 	}
@@ -68,7 +71,7 @@ func main() {
 	log.Info("Build Info information", "version", version, "build_time", buildTime, "app_name", appName)
 
 	// Set up OpenTelemetry providers.
-	otelShutdown, observabilityInst, otelErr := o11.SetupOTelSDK(ctx, &cfg.O11, "whatsappbot-golang", version)
+	otelShutdown, observabilityInst, otelErr := o11.SetupOTelSDK(ctx, &cfg.O11, "claudeai-api", version)
 	if otelErr != nil {
 		log.Error("OpenTelemetry setup error", "error", otelErr)
 		os.Exit(1)
@@ -79,42 +82,8 @@ func main() {
 		}
 	}()
 
-	// Open the application database
-	repo, repoErr := repository.New(repository.Config{
-		Driver:     cfg.Bot.DBDriver,
-		DSN:        cfg.Bot.DatabaseDSN(),
-		AutoCreate: cfg.Bot.DBAutoCreate,
-	}, log)
-	if repoErr != nil {
-		log.Error("Database setup error", "error", repoErr)
-		os.Exit(1)
-	}
-	defer func() {
-		if err := repo.Close(); err != nil {
-			log.Error("Database close error", "error", err)
-		}
-	}()
-
-	// Create the WhatsApp client and command router
-	waClient, waErr := whatsapp.NewClient(cfg.Bot.SessionDBPath, log)
-	if waErr != nil {
-		log.Error("WhatsApp client setup error", "error", waErr)
-		os.Exit(1)
-	}
-
-	commandMetrics, cmdErr := o11.NewCommandMetrics(observabilityInst.MeterProvider)
-	if cmdErr != nil {
-		log.Error("Command metrics setup error", "error", cmdErr)
-		os.Exit(1)
-	}
-
-	botJIDs := whatsapp.BotMentionJIDs(cfg.Bot.BotNumber, cfg.Bot.MentionedBotNumber)
-	router := whatsapp.NewRouter(log, commandMetrics, observabilityInst.Trace, botJIDs,
-		time.Duration(cfg.Bot.CommandTimeout)*time.Second)
-	waClient.AddEventHandler(router.HandleEvent)
-
-	// HTTP servers
-	publicServer := (&http_server.HTTPServerConfig{
+	// The single HTTP server (API, health, metrics, Swagger, skills)
+	server := (&http_server.HTTPServerConfig{
 		Addr:         cfg.HttpServer.Address,
 		Port:         cfg.HttpServer.Port,
 		Timeout:      cfg.HttpServer.Timeout,
@@ -123,21 +92,9 @@ func main() {
 		Log:          log,
 	}).New()
 
-	internalServer := (&http_server.HTTPServerConfig{
-		Addr:         cfg.InternalServer.Address,
-		Port:         cfg.InternalServer.Port,
-		Timeout:      cfg.InternalServer.Timeout,
-		ReadTimeout:  cfg.InternalServer.ReadTimeout,
-		WriteTimeout: cfg.InternalServer.WriteTimeout,
-		Log:          log,
-	}).New()
-
 	// Build app with all dependencies injected
 	application := app.NewApp(cfg).
-		WithPublicServer(publicServer).
-		WithInternalServer(internalServer).
-		WithWhatsApp(waClient, router).
-		WithRepository(repo).
+		WithServer(server).
 		WithLog(log).
 		WithObservability(&observabilityInst).
 		WithBuildInfo(model.BuildInfo{
@@ -156,15 +113,24 @@ func main() {
 	log.Info("Application terminated")
 }
 
-// healthCheck queries the internal server health endpoint and returns 0 on success
+// defaultHealthPort is the single server's default port (-http-port).
+const defaultHealthPort = "46564"
+
+// healthCheck queries the local health endpoint (public, no API key needed)
+// and returns 0 on success. It connects over loopback, which works for a server
+// bound to 127.0.0.1 or 0.0.0.0.
 func healthCheck() int {
-	port := "9000"
+	port := defaultHealthPort
 	if len(os.Args) > 2 {
 		port = os.Args[2]
 	}
+	return probeHealth("http://127.0.0.1:" + port + "/api/v1/health")
+}
 
+// probeHealth GETs url and returns 0 only for a 200 answer.
+func probeHealth(url string) int {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("http://localhost:" + port + "/api/v1/health")
+	resp, err := client.Get(url)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "health check failed: %v\n", err)
 		return 1

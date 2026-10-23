@@ -97,20 +97,6 @@ func TestMetricFactoriesExposeExpectedInstruments(t *testing.T) {
 			histograms: map[string]string{"http_server_request_duration_seconds": "s"},
 		},
 		{
-			name:  "command",
-			meter: MeterCommand,
-			record: func(t *testing.T, mp metric.MeterProvider) {
-				m, err := NewCommandMetrics(mp)
-				if err != nil {
-					t.Fatalf("NewCommandMetrics failed: %v", err)
-				}
-				m.CommandsTotal.Add(ctx, 1)
-				m.CommandDuration.Record(ctx, 1.5)
-			},
-			counters:   map[string]int64{"whatsapp_commands_total": 1},
-			histograms: map[string]string{"whatsapp_command_duration_seconds": "s"},
-		},
-		{
 			name:  "repository",
 			meter: MeterRepo,
 			record: func(t *testing.T, mp metric.MeterProvider) {
@@ -188,7 +174,7 @@ func TestNewBusinessCounter(t *testing.T) {
 	ctx := context.Background()
 	mp, reader := newManualMeterProvider(t)
 
-	counter, err := NewBusinessCounter(mp, "kiosk_links_generated_total", "Download links generated")
+	counter, err := NewBusinessCounter(mp, "requests_served_total", "Requests served")
 	if err != nil {
 		t.Fatalf("NewBusinessCounter failed: %v", err)
 	}
@@ -196,11 +182,11 @@ func TestNewBusinessCounter(t *testing.T) {
 	counter.Add(ctx, 2, metric.WithAttributes(attribute.String("category", "magazine")))
 
 	// Business counters share the service meter with the external API metrics.
-	m, ok := collectedMetrics(t, reader)[MeterService]["kiosk_links_generated_total"]
+	m, ok := collectedMetrics(t, reader)[MeterService]["requests_served_total"]
 	if !ok {
 		t.Fatalf("business counter not exported under meter %q", MeterService)
 	}
-	if m.Description != "Download links generated" {
+	if m.Description != "Requests served" {
 		t.Errorf("description = %q", m.Description)
 	}
 	sum := m.Data.(metricdata.Sum[int64])

@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/http/handlers"
+	"github.com/martinezsaweczko/claudeai-api/http/handlers"
 )
 
 func TestSwaggerRoutesRegistered(t *testing.T) {

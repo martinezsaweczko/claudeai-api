@@ -10,13 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/config"
-	"github.com/martinezsaweczko/whatsappBot-golang/http/middleware"
-	"github.com/martinezsaweczko/whatsappBot-golang/model"
-	"github.com/martinezsaweczko/whatsappBot-golang/o11"
-	"github.com/martinezsaweczko/whatsappBot-golang/repository"
-	"github.com/martinezsaweczko/whatsappBot-golang/services/scheduler"
-	"github.com/martinezsaweczko/whatsappBot-golang/whatsapp"
+	"github.com/martinezsaweczko/claudeai-api/config"
+	"github.com/martinezsaweczko/claudeai-api/http/middleware"
+	"github.com/martinezsaweczko/claudeai-api/model"
+	"github.com/martinezsaweczko/claudeai-api/o11"
+	"github.com/martinezsaweczko/claudeai-api/services/claude"
 )
 
 // Server defines the interface for any HTTP server implementation
@@ -31,45 +29,40 @@ type Server interface {
 }
 
 type App struct {
-	ctx            context.Context
-	config         *config.Config
-	publicServer   Server
-	internalServer Server
-	waClient       *whatsapp.Client
-	router         *whatsapp.Router
-	repo           *repository.DB
-	log            *slog.Logger
-	observability  *o11.ObservabilityInst
-	buildInfo      model.BuildInfo
-	basePath       string
-	scheduler      *scheduler.Service
+	ctx           context.Context
+	config        *config.Config
+	server        Server // the single HTTP server: API, health, metrics, Swagger, skills
+	log           *slog.Logger
+	observability *o11.ObservabilityInst
+	buildInfo     model.BuildInfo
+	basePath      string
+	lookupEnv     func(string) (string, bool)
+
+	// apiKeyAuth guards /v1, /metrics and the skills endpoints. It is a
+	// pass-through when no API keys are configured.
+	apiKeyAuth middleware.Middleware
+
+	// claude runs chat requests (consumed by the /v1 handlers).
+	claude claude.Backend
+
+	// skills keeps the optional skills repository synced; nil when disabled.
+	skills               skillsSyncer
+	skillsMetrics        *o11.SkillsMetrics // nil when skills are disabled
+	skillsStop           func() error
+	initialSkillsTimeout time.Duration // test override of initialSkillsSyncTimeout
 }
 
 func NewApp(cfg *config.Config) *App {
 	return &App{
-		config: cfg,
-		ctx:    context.Background(),
+		config:    cfg,
+		ctx:       context.Background(),
+		lookupEnv: os.LookupEnv,
 	}
 }
 
-func (app *App) WithPublicServer(server Server) *App {
-	app.publicServer = server
-	return app
-}
-
-func (app *App) WithInternalServer(server Server) *App {
-	app.internalServer = server
-	return app
-}
-
-func (app *App) WithWhatsApp(client *whatsapp.Client, router *whatsapp.Router) *App {
-	app.waClient = client
-	app.router = router
-	return app
-}
-
-func (app *App) WithRepository(repo *repository.DB) *App {
-	app.repo = repo
+// WithServer sets the single HTTP server and returns the app instance for chaining.
+func (app *App) WithServer(server Server) *App {
+	app.server = server
 	return app
 }
 
@@ -96,55 +89,31 @@ func (app *App) WithBasePath(basePath string) *App {
 	return app
 }
 
-// WithScheduler sets the scheduler service and returns the app instance for chaining.
-func (app *App) WithScheduler(s *scheduler.Service) *App {
-	app.scheduler = s
-	return app
-}
-
 func (app *App) Run() error {
 	// Validate required dependencies
-	if app.publicServer == nil || app.internalServer == nil {
-		return fmt.Errorf("server dependencies are required: use WithPublicServer() and WithInternalServer()")
-	}
-	if app.waClient == nil || app.router == nil {
-		return fmt.Errorf("whatsapp dependencies are required: use WithWhatsApp()")
-	}
-	if app.repo == nil {
-		return fmt.Errorf("repository dependency is required: use WithRepository()")
+	if app.server == nil {
+		return fmt.Errorf("server dependency is required: use WithServer()")
 	}
 	if app.log == nil {
 		return fmt.Errorf("logger dependency is required: use WithLog()")
 	}
 
-	// Wire handlers, routes and commands
+	// Wire handlers and routes
 	if err := app.initAndWire(); err != nil {
 		return fmt.Errorf("failed to initialize: %w", err)
 	}
 
-	// Start HTTP servers
-	if err := app.publicServer.Start(); err != nil {
-		return fmt.Errorf("failed to start public server: %w", err)
-	}
-	if err := app.internalServer.Start(); err != nil {
-		return fmt.Errorf("failed to start internal server: %w", err)
-	}
+	// Skills: one bounded initial sync so the first requests usually have
+	// them, then the background loop. Never blocks startup for long.
+	app.startSkills()
 
-	// Connect to WhatsApp (login flow if needed)
-	if err := app.waClient.Connect(app.ctx, app.config.Bot.PairPhone); err != nil {
-		return fmt.Errorf("failed to connect to WhatsApp: %w", err)
-	}
-
-	// Start the scheduler after WhatsApp is connected so jobs can send messages.
-	if app.scheduler != nil {
-		if err := app.scheduler.Start(app.ctx); err != nil {
-			return fmt.Errorf("failed to start scheduler: %w", err)
-		}
+	// Start the HTTP server
+	if err := app.server.Start(); err != nil {
+		return fmt.Errorf("failed to start server: %w", err)
 	}
 
 	app.log.Info("Application started",
-		"public_port", app.config.HttpServer.Port,
-		"internal_port", app.config.InternalServer.Port,
+		"port", app.config.HttpServer.Port,
 		"version", app.buildInfo.Version)
 
 	// Setup signal handling for graceful shutdown
@@ -158,7 +127,7 @@ func (app *App) Run() error {
 	return app.shutdown()
 }
 
-// shutdown stops servers, waits for in-flight commands and disconnects WhatsApp
+// shutdown gracefully stops the HTTP server
 func (app *App) shutdown() error {
 	shutdownCtx, cancel := context.WithTimeout(app.ctx, 30*time.Second)
 	defer cancel()
@@ -166,24 +135,19 @@ func (app *App) shutdown() error {
 	app.log.Info("Starting graceful shutdown")
 
 	var shutdownErr error
-	if err := app.publicServer.Stop(shutdownCtx); err != nil {
-		app.log.Error("Error during public server shutdown", "error", err)
-		shutdownErr = err
-	}
-	if err := app.internalServer.Stop(shutdownCtx); err != nil {
-		app.log.Error("Error during internal server shutdown", "error", err)
+	if err := app.server.Stop(shutdownCtx); err != nil {
+		app.log.Error("Error during server shutdown", "error", err)
 		shutdownErr = err
 	}
 
-	// Stop the scheduler before waiting for in-flight commands.
-	if app.scheduler != nil {
-		app.scheduler.Stop()
+	if err := app.stopSkills(); err != nil {
+		app.log.Error("Error stopping skills sync", "error", err)
+		shutdownErr = err
 	}
-
-	// Wait for in-flight WhatsApp commands, then disconnect
-	app.log.Info("Waiting for in-flight commands to finish")
-	app.router.Wait()
-	app.waClient.Disconnect()
+	if err := app.closeBackend(); err != nil {
+		app.log.Error("Error closing Claude backend", "error", err)
+		shutdownErr = err
+	}
 
 	app.log.Info("Application shut down gracefully")
 	return shutdownErr

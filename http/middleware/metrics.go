@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/o11"
+	"github.com/martinezsaweczko/claudeai-api/o11"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )

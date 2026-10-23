@@ -8,7 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/o11"
+	"github.com/martinezsaweczko/claudeai-api/http/middleware"
+	"github.com/martinezsaweczko/claudeai-api/o11"
 	"go.opentelemetry.io/otel/metric/noop"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -44,4 +45,21 @@ func TestHealthHandlerIsQuiet(t *testing.T) {
 	if logs.Len() != 0 {
 		t.Errorf("health request logged at Info or above: %q", logs.String())
 	}
+}
+
+// muxRouter is a minimal Router backed by a ServeMux for handler tests.
+type muxRouter struct{ mux *http.ServeMux }
+
+func (r *muxRouter) Handle(pattern string, h http.Handler) { r.mux.Handle(pattern, h) }
+
+func (r *muxRouter) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
+	r.mux.HandleFunc(pattern, h)
+}
+
+func (r *muxRouter) HandleWithMiddleware(pattern string, h http.Handler, mws ...middleware.Middleware) {
+	r.mux.Handle(pattern, middleware.Chain(h, mws...))
+}
+
+func (r *muxRouter) HandleFuncWithMiddleware(pattern string, h func(http.ResponseWriter, *http.Request), mws ...middleware.Middleware) {
+	r.mux.Handle(pattern, middleware.Chain(http.HandlerFunc(h), mws...))
 }

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/http/middleware"
+	"github.com/martinezsaweczko/claudeai-api/http/middleware"
 )
 
 func discardLogger() *slog.Logger {
@@ -127,9 +127,8 @@ func TestStartServesRequestsUntilStopped(t *testing.T) {
 	}
 }
 
-// A port that is already taken is only logged: Start still returns nil and the
-// process keeps running. This pins that documented behavior.
-func TestStartReturnsNilWhenThePortIsTaken(t *testing.T) {
+// A bind failure must be returned by Start so the caller can abort startup.
+func TestStartReturnsAnErrorWhenThePortIsTaken(t *testing.T) {
 	occupied, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to occupy a port: %v", err)
@@ -137,20 +136,14 @@ func TestStartReturnsNilWhenThePortIsTaken(t *testing.T) {
 	defer occupied.Close()
 	port := occupied.Addr().(*net.TCPAddr).Port
 
-	logs := &errorLogHandler{errors: make(chan string, 4)}
-	server := (&HTTPServerConfig{Addr: "127.0.0.1", Port: port, Log: slog.New(logs)}).New()
+	server := (&HTTPServerConfig{Addr: "127.0.0.1", Port: port, Log: discardLogger()}).New()
 
-	if err := server.Start(); err != nil {
-		t.Fatalf("Start = %v, want nil even when the port is taken", err)
+	err = server.Start()
+	if err == nil {
+		t.Fatal("Start = nil, want a bind error when the port is taken")
 	}
-
-	select {
-	case msg := <-logs.errors:
-		if !strings.Contains(msg, "Server error") || !strings.Contains(msg, "address already in use") {
-			t.Errorf("unexpected error log: %q", msg)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the bind failure was never logged")
+	if !strings.Contains(err.Error(), "address already in use") {
+		t.Errorf("Start error = %v, want it to mention the address already in use", err)
 	}
 
 	if err := server.Stop(context.Background()); err != nil {
