@@ -82,7 +82,7 @@ jobs:
           context: .
           file: Containerfile
           push: false
-          tags: whatsappbot-golang:ci
+          tags: claudeai-api:ci
 
   # Publishes the shields.io endpoint file behind the README coverage badge.
   # The orphan `badges` branch holds a single commit with coverage.json only.

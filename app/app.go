@@ -10,13 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/config"
-	"github.com/martinezsaweczko/whatsappBot-golang/http/middleware"
-	"github.com/martinezsaweczko/whatsappBot-golang/model"
-	"github.com/martinezsaweczko/whatsappBot-golang/o11"
-	"github.com/martinezsaweczko/whatsappBot-golang/repository"
-	"github.com/martinezsaweczko/whatsappBot-golang/services/scheduler"
-	"github.com/martinezsaweczko/whatsappBot-golang/whatsapp"
+	"github.com/martinezsaweczko/claudeai-api/config"
+	"github.com/martinezsaweczko/claudeai-api/http/middleware"
+	"github.com/martinezsaweczko/claudeai-api/model"
+	"github.com/martinezsaweczko/claudeai-api/o11"
 )
 
 // Server defines the interface for any HTTP server implementation
@@ -35,14 +32,10 @@ type App struct {
 	config         *config.Config
 	publicServer   Server
 	internalServer Server
-	waClient       *whatsapp.Client
-	router         *whatsapp.Router
-	repo           *repository.DB
 	log            *slog.Logger
 	observability  *o11.ObservabilityInst
 	buildInfo      model.BuildInfo
 	basePath       string
-	scheduler      *scheduler.Service
 }
 
 func NewApp(cfg *config.Config) *App {
@@ -59,17 +52,6 @@ func (app *App) WithPublicServer(server Server) *App {
 
 func (app *App) WithInternalServer(server Server) *App {
 	app.internalServer = server
-	return app
-}
-
-func (app *App) WithWhatsApp(client *whatsapp.Client, router *whatsapp.Router) *App {
-	app.waClient = client
-	app.router = router
-	return app
-}
-
-func (app *App) WithRepository(repo *repository.DB) *App {
-	app.repo = repo
 	return app
 }
 
@@ -96,28 +78,16 @@ func (app *App) WithBasePath(basePath string) *App {
 	return app
 }
 
-// WithScheduler sets the scheduler service and returns the app instance for chaining.
-func (app *App) WithScheduler(s *scheduler.Service) *App {
-	app.scheduler = s
-	return app
-}
-
 func (app *App) Run() error {
 	// Validate required dependencies
 	if app.publicServer == nil || app.internalServer == nil {
 		return fmt.Errorf("server dependencies are required: use WithPublicServer() and WithInternalServer()")
 	}
-	if app.waClient == nil || app.router == nil {
-		return fmt.Errorf("whatsapp dependencies are required: use WithWhatsApp()")
-	}
-	if app.repo == nil {
-		return fmt.Errorf("repository dependency is required: use WithRepository()")
-	}
 	if app.log == nil {
 		return fmt.Errorf("logger dependency is required: use WithLog()")
 	}
 
-	// Wire handlers, routes and commands
+	// Wire handlers and routes
 	if err := app.initAndWire(); err != nil {
 		return fmt.Errorf("failed to initialize: %w", err)
 	}
@@ -128,18 +98,6 @@ func (app *App) Run() error {
 	}
 	if err := app.internalServer.Start(); err != nil {
 		return fmt.Errorf("failed to start internal server: %w", err)
-	}
-
-	// Connect to WhatsApp (login flow if needed)
-	if err := app.waClient.Connect(app.ctx, app.config.Bot.PairPhone); err != nil {
-		return fmt.Errorf("failed to connect to WhatsApp: %w", err)
-	}
-
-	// Start the scheduler after WhatsApp is connected so jobs can send messages.
-	if app.scheduler != nil {
-		if err := app.scheduler.Start(app.ctx); err != nil {
-			return fmt.Errorf("failed to start scheduler: %w", err)
-		}
 	}
 
 	app.log.Info("Application started",
@@ -158,7 +116,7 @@ func (app *App) Run() error {
 	return app.shutdown()
 }
 
-// shutdown stops servers, waits for in-flight commands and disconnects WhatsApp
+// shutdown gracefully stops both HTTP servers
 func (app *App) shutdown() error {
 	shutdownCtx, cancel := context.WithTimeout(app.ctx, 30*time.Second)
 	defer cancel()
@@ -174,16 +132,6 @@ func (app *App) shutdown() error {
 		app.log.Error("Error during internal server shutdown", "error", err)
 		shutdownErr = err
 	}
-
-	// Stop the scheduler before waiting for in-flight commands.
-	if app.scheduler != nil {
-		app.scheduler.Stop()
-	}
-
-	// Wait for in-flight WhatsApp commands, then disconnect
-	app.log.Info("Waiting for in-flight commands to finish")
-	app.router.Wait()
-	app.waClient.Disconnect()
 
 	app.log.Info("Application shut down gracefully")
 	return shutdownErr

@@ -1,62 +1,32 @@
-# Makefile for building and managing the WhatsApp bot
+# Makefile for building and managing claudeai-api
 # Set LDFlags for versioning and build information
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo "dev")
 BUILD_TIME := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-APP_NAME := whatsappbot-golang
+APP_NAME := claudeai-api
 LDFLAGS := -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.appName=$(APP_NAME)
 
-imageTag := whatsappbot-golang
+imageTag := claudeai-api
 SWAG := $(shell go env GOPATH)/bin/swag
-GOOSE := $(shell go env GOPATH)/bin/goose
-DB_DRIVER ?= sqlite
-DB_DSN ?= /tmp/db.sqlite
 
-.PHONY: build binary check check-swagger ci clean clean-keys container coverage coverage-total keys migrate migrate-mysql run swagger test vulncheck
+.PHONY: build binary check check-swagger ci clean container coverage coverage-total run swagger test vulncheck
 
 # Coverage profile. The generated swagger package (docs/) is excluded because
 # it is swag output, not authored code.
 COVERAGE_PROFILE := coverage.out
 COVERAGE_EXCLUDE := /docs/
 
-keys: clean-keys
-	@mkdir -p keys
-	@echo "Generating RSA private key..."
-	openssl genrsa -out keys/private.pem 2048
-	@echo "Generating RSA public key..."
-	openssl rsa -in keys/private.pem -pubout -out keys/public.pem
-	@echo "Keys generated successfully in keys/ directory"
-
-clean-keys:
-	rm -rf keys
-
 swagger:
 	$(SWAG) init -g cmd/main.go -o docs
-
-migrate:
-ifeq ($(DB_DRIVER),sqlite)
-	$(GOOSE) -dir repository/migrations/sqlite sqlite3 "$(DB_DSN)" up
-else ifeq ($(DB_DRIVER),mysql)
-	$(GOOSE) -dir repository/migrations/mysql mysql "$(DB_DSN)" up
-else
-	@echo "Unsupported DB_DRIVER=$(DB_DRIVER). Use sqlite or mysql."
-	@exit 1
-endif
-
-migrate-mysql:
-	$(GOOSE) -dir repository/migrations/mysql mysql "$(MYSQL_DSN)" up
 
 check-swagger:
 	@rm -rf /tmp/docs
 	$(SWAG) init -g cmd/main.go -o /tmp/docs
 	@diff -r docs /tmp/docs || (echo "Swagger docs are out of date. Run 'make swagger' and commit the changes." && exit 1)
 
-build: clean check check-swagger keys
+build: clean check check-swagger
 	go build -ldflags "$(LDFLAGS)" -o build/main cmd/main.go
 
 binary: swagger
-	mkdir -p /tmp/periodico/nacional
-	mkdir -p /tmp/periodico/internacional
-	mkdir -p /tmp/periodico/magazine
 	go build -ldflags "$(LDFLAGS)" -o build/main cmd/main.go
 
 check:

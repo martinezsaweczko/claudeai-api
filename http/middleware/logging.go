@@ -57,5 +57,22 @@ func (w *wrappedResponseWriter) Write(b []byte) (int, error) {
 	return n, err
 }
 
-// Ensure wrappedResponseWriter implements http.ResponseWriter
-var _ http.ResponseWriter = (*wrappedResponseWriter)(nil)
+// Flush implements http.Flusher by delegating to the underlying writer when it
+// supports flushing. It is required for streaming (SSE) responses.
+func (w *wrappedResponseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap returns the underlying writer so http.NewResponseController can reach
+// optional interfaces such as deadlines and hijacking.
+func (w *wrappedResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+// Ensure wrappedResponseWriter implements the optional writer interfaces
+var (
+	_ http.ResponseWriter = (*wrappedResponseWriter)(nil)
+	_ http.Flusher        = (*wrappedResponseWriter)(nil)
+)

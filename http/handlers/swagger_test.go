@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/http/middleware"
+	"github.com/martinezsaweczko/claudeai-api/http/middleware"
 	"log/slog"
 	"os"
 )

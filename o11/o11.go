@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/config"
+	"github.com/martinezsaweczko/claudeai-api/config"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/prometheus"
@@ -145,7 +145,7 @@ func newTracerProvider(ctx context.Context, tracerEndpoint string, res *resource
 
 	tracerProvider := trace.NewTracerProvider(
 		trace.WithResource(res),
-		// Low-traffic bot: sample everything when tracing is enabled
+		// low-traffic service: sample everything when tracing is enabled
 		trace.WithSampler(trace.ParentBased(trace.AlwaysSample())),
 		trace.WithBatcher(traceExporter,
 			// Default is 5s. Set to 1s for demonstrative purposes.

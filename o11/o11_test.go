@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/config"
+	"github.com/martinezsaweczko/claudeai-api/config"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/baggage"
 	logglobal "go.opentelemetry.io/otel/log/global"
@@ -32,7 +32,7 @@ func TestNewPropagatorCarriesTraceContextAndBaggage(t *testing.T) {
 		SpanID:     spanID,
 		TraceFlags: trace.FlagsSampled,
 	}))
-	member, err := baggage.NewMember("tenant", "kiosk")
+	member, err := baggage.NewMember("tenant", "tenant-a")
 	if err != nil {
 		t.Fatalf("failed to build baggage member: %v", err)
 	}
@@ -53,8 +53,8 @@ func TestNewPropagatorCarriesTraceContextAndBaggage(t *testing.T) {
 	if sc.TraceID() != traceID || sc.SpanID() != spanID || !sc.IsRemote() {
 		t.Errorf("extracted span context = %+v, want the injected remote one", sc)
 	}
-	if got := baggage.FromContext(extracted).Member("tenant").Value(); got != "kiosk" {
-		t.Errorf("extracted baggage tenant = %q, want kiosk", got)
+	if got := baggage.FromContext(extracted).Member("tenant").Value(); got != "tenant-a" {
+		t.Errorf("extracted baggage tenant = %q, want tenant-a", got)
 	}
 }
 
@@ -73,7 +73,7 @@ func TestSetupOTelSDKWithoutExporters(t *testing.T) {
 	})
 
 	ctx := context.Background()
-	shutdown, inst, err := SetupOTelSDK(ctx, &config.O11Config{Environment: "test"}, "whatsappbot-test", "v0.0.0")
+	shutdown, inst, err := SetupOTelSDK(ctx, &config.O11Config{Environment: "test"}, "claudeai-api-test", "v0.0.0")
 	if err != nil {
 		t.Fatalf("SetupOTelSDK failed: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestNewResourceIdentifiesService(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"service.name":                "whatsappbot-golang",
+		"service.name":                "claudeai-api",
 		"service.version":             "1.2.3",
 		"deployment.environment.name": "prod",
 	}
@@ -146,7 +146,7 @@ func TestNewResourceIdentifiesService(t *testing.T) {
 				t.Setenv(k, v)
 			}
 
-			res := newResource("whatsappbot-golang", "1.2.3", "prod")
+			res := newResource("claudeai-api", "1.2.3", "prod")
 
 			for key, value := range want {
 				if got := resourceAttr(res, key); got != value {

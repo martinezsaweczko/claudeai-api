@@ -10,33 +10,31 @@ RUN go mod download
 # Copy source
 COPY . .
 
-# Build static binary (modernc.org/sqlite is pure Go, no CGO needed)
+# Build static binary (pure Go, no CGO needed)
 ARG VERSION=dev
 ARG BUILD_TIME=unknown
 RUN CGO_ENABLED=0 go build -trimpath \
-    -ldflags "-X main.version=${VERSION} -X main.buildTime=${BUILD_TIME} -X main.appName=whatsappbot-golang -s -w" \
-    -o /out/whatsappbot cmd/main.go
+    -ldflags "-X main.version=${VERSION} -X main.buildTime=${BUILD_TIME} -X main.appName=claudeai-api -s -w" \
+    -o /out/claudeai-api cmd/main.go
 
 # Runtime stage - minimal image
 FROM debian:bookworm-slim
 
-# ca-certificates: HTTPS calls (WhatsApp, OpenAI, ESIOS...)
-# tzdata: Europe/Madrid timezone for the electricity price window
+# ca-certificates: outbound HTTPS calls
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root user
-RUN groupadd -g 1001 botuser && \
-    useradd -m -u 1001 -g botuser botuser
+RUN groupadd -g 1001 appuser && \
+    useradd -m -u 1001 -g appuser appuser
 
-COPY --from=builder /out/whatsappbot /usr/local/bin/whatsappbot
+COPY --from=builder /out/claudeai-api /usr/local/bin/claudeai-api
 
-USER botuser
+USER appuser
 
 # Internal API health check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/usr/local/bin/whatsappbot", "-health-check"] || exit 1
+    CMD ["/usr/local/bin/claudeai-api", "-health-check"] || exit 1
 
-ENTRYPOINT ["/usr/local/bin/whatsappbot"]
+ENTRYPOINT ["/usr/local/bin/claudeai-api"]

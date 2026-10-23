@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/http/middleware"
+	"github.com/martinezsaweczko/claudeai-api/http/middleware"
 )
 
 type Router interface {

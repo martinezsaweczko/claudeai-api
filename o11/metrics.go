@@ -6,10 +6,9 @@ import (
 
 // Meter names, one per application layer
 const (
-	MeterHTTP    = "whatsappbot/http"
-	MeterCommand = "whatsappbot/command"
-	MeterRepo    = "whatsappbot/repository"
-	MeterService = "whatsappbot/service"
+	MeterHTTP    = "claudeai-api/http"
+	MeterRepo    = "claudeai-api/repository"
+	MeterService = "claudeai-api/service"
 )
 
 // HTTPMetrics holds the RED (rate, errors, duration) instruments for HTTP servers
@@ -45,34 +44,6 @@ func NewHTTPMetrics(mp metric.MeterProvider) (*HTTPMetrics, error) {
 		RequestsTotal:   requestsTotal,
 		RequestDuration: requestDuration,
 		InFlight:        inFlight,
-	}, nil
-}
-
-// CommandMetrics holds the instruments for WhatsApp command execution
-type CommandMetrics struct {
-	CommandsTotal   metric.Int64Counter
-	CommandDuration metric.Float64Histogram
-}
-
-func NewCommandMetrics(mp metric.MeterProvider) (*CommandMetrics, error) {
-	m := mp.Meter(MeterCommand)
-
-	commandsTotal, err := m.Int64Counter("whatsapp_commands_total",
-		metric.WithDescription("Total number of WhatsApp commands executed"))
-	if err != nil {
-		return nil, err
-	}
-
-	commandDuration, err := m.Float64Histogram("whatsapp_command_duration_seconds",
-		metric.WithDescription("WhatsApp command execution duration in seconds"),
-		metric.WithUnit("s"))
-	if err != nil {
-		return nil, err
-	}
-
-	return &CommandMetrics{
-		CommandsTotal:   commandsTotal,
-		CommandDuration: commandDuration,
 	}, nil
 }
 
@@ -133,7 +104,7 @@ func NewServiceMetrics(mp metric.MeterProvider) (*ServiceMetrics, error) {
 }
 
 // NewBusinessCounter creates a single counter in the service meter for a business event.
-// Business counters are created where they are used (kiosk, subscriptions, electricity...)
+// Business counters are created where they are used (requests, tokens, cost...)
 func NewBusinessCounter(mp metric.MeterProvider, name, description string) (metric.Int64Counter, error) {
 	return mp.Meter(MeterService).Int64Counter(name, metric.WithDescription(description))
 }

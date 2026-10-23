@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/martinezsaweczko/whatsappBot-golang/services"
+	"github.com/martinezsaweczko/claudeai-api/services"
 )
 
 // AuthorizationMiddleware creates a middleware that verifies JWT tokens from the Authorization header
