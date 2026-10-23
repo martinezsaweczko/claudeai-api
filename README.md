@@ -5,11 +5,44 @@
 [![Release](https://github.com/martinezsaweczko/claudeai-api/actions/workflows/release.yml/badge.svg)](https://github.com/martinezsaweczko/claudeai-api/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/martinezsaweczko/claudeai-api)](https://github.com/martinezsaweczko/claudeai-api/releases/latest)
 
-OpenAI-compatible HTTP API (`/v1/models`, `/v1/chat/completions`, including SSE streaming) backed by the Claude Code CLI. The service is stateless: the client sends the full conversation on every request and each request runs a fresh `claude` process. Personal use only.
+An OpenAI-compatible HTTP API (`/v1/models`, `/v1/chat/completions`, including SSE streaming) that answers with the **Claude Code CLI**, authenticated with your own Claude Max subscription. Point any OpenAI client (Open WebUI, SDKs, `curl`) at it and get Claude.
 
-> Status: `GET /v1/models` and `POST /v1/chat/completions` (including SSE streaming with `stream: true`) are implemented.
+The service is **stateless**: the client sends the whole conversation on every request and each request runs a fresh `claude -p` process. Any container can serve any request, so you can run several behind a load balancer.
+
+> **Personal use only.** This gateway is meant for you, with your own subscription. Anthropic's terms do not allow routing Max credentials on behalf of other users, and your usage limits are shared across every container or client that uses the same login (see [Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)). The gateway limits concurrency (`-claude-max-concurrency`) for that reason; do not offer it to third parties.
+
+## Contents
+
+- [Architecture](#architecture)
+- [Quickstart A: run locally](#quickstart-a-run-locally)
+- [Quickstart B: run in a container](#quickstart-b-run-in-a-container)
+- [Authentication](#authentication)
+- [Configuration reference](#configuration-reference)
+- [API](#api)
+- [Skills](#skills)
+- [Observability](#observability)
+- [Operations](#operations)
+- [Troubleshooting](#troubleshooting)
+- [Limits and non-goals](#limits-and-non-goals)
+- [Security notes](#security-notes)
+- [Development](#development)
 
 ## Architecture
+
+```
+                         +----------------------------- gateway (one container) -----------------------------+
+ OpenAI client           |  public :46564                                                                      |
+ (Open WebUI, SDK, curl) |  /v1/models  /v1/chat/completions   --> concurrency limit --> claude -p (per request)|--> Anthropic
+        |  Bearer key    |        |                                  (own process group, isolation flags)      |    (Max login via
+        +--------------> |  tracing -> metrics -> logging -> API-key auth                                        |     CLAUDE_CODE_OAUTH_TOKEN)
+                         |                                                                                      |
+ Prometheus / Grafana    |  internal :9000 (no auth, keep private)                                              |
+        +--------------> |  /api/v1/health  /api/v1/version  /metrics  /api/v1/docs  /api/v1/skills[/refresh]    |
+                         |                                                                                      |
+ private skills repo     |  skills syncer: git (ssh, read-only deploy key) --> validated, read-only snapshot     |
+        <--------------- |  used as the cwd of every claude run (--tools Skill --setting-sources project)        |
+                         +--------------------------------------------------------------------------------------+
+```
 
 Package-by-layer with consumer-defined interfaces and manual DI (`app/`):
 
@@ -18,77 +51,165 @@ cmd/main.go        bootstrap
 app/               App builder + wiring
 config/            CLI flag configuration with validation
 http_server/       net/http server wrapper (synchronous bind, graceful stop)
-http/              handlers (health, version, metrics, swagger) + middleware
+http/              handlers (chat, models, health, version, skills, metrics, swagger) + middleware
+services/claude    Claude CLI backend (stream-json parsing, errors, process control)
+services/skills    git-backed skills syncer
 services/          shared service helpers (instrumented HTTP client)
 o11/               OTel setup, metrics factories, trace-aware slog handler
+grafana/           dashboard + example alert rules
 ```
 
-HTTP servers:
-- **Public** (`-http-port`, default 46564): the API. The write timeout (`-http-write-timeout`) defaults to 0 (disabled) so long SSE streams are not cut.
-- **Internal** (`-internal-port`, default 9000): `GET /api/v1/health`, `GET /api/v1/version`, `GET /api/v1/docs` (Swagger UI), `GET /metrics`. No authentication: do not expose it publicly.
+Two HTTP servers:
 
-## Build & run
+- **Public** (`-http-port`, default 46564): the API. The write timeout (`-http-write-timeout`) defaults to 0 (disabled) so long SSE streams are not cut.
+- **Internal** (`-internal-port`, default 9000): `GET /api/v1/health`, `GET /api/v1/version`, `GET /api/v1/docs` (Swagger UI), `GET /metrics`, `GET /api/v1/skills`, `POST /api/v1/skills/refresh`. **No authentication**: never expose it publicly.
+
+Both servers listen on **127.0.0.1** by default (secure by default for a personal tool). The container image passes `0.0.0.0` explicitly so the published port works.
+
+## Quickstart A: run locally
+
+1. Install the Claude Code CLI ([setup docs](https://code.claude.com/docs/en/setup)) and log in once, or create a long-lived token:
+
+   ```bash
+   curl -fsSL https://claude.ai/install.sh | bash
+   claude setup-token            # prints a token valid for one year; copy it
+   export CLAUDE_CODE_OAUTH_TOKEN=<token>   # optional if `claude` is already logged in on this machine
+   ```
+
+2. Run the gateway (loopback only, no API keys):
+
+   ```bash
+   make run                      # go run ./cmd  (public 127.0.0.1:46564, internal 127.0.0.1:9000)
+   # or: go build -o build/main ./cmd && ./build/main
+   ```
+
+3. Call it:
+
+   ```bash
+   curl -s http://127.0.0.1:46564/v1/models
+   curl -s http://127.0.0.1:46564/v1/chat/completions -H 'Content-Type: application/json' \
+     -d '{"model":"haiku","messages":[{"role":"user","content":"Reply with the single word OK"}]}'
+   ```
+
+   ```python
+   from openai import OpenAI
+
+   client = OpenAI(base_url="http://127.0.0.1:46564/v1", api_key="anything")  # use a real key when auth is enabled
+   r = client.chat.completions.create(model="haiku", messages=[{"role": "user", "content": "Hi"}])
+   print(r.choices[0].message.content)
+   ```
+
+   Open WebUI and similar tools: add an OpenAI-compatible connection with base URL `http://127.0.0.1:46564/v1` (from another container use the host or service name) and the API key if you set `CLAUDEAI_API_KEYS` (any non-empty string otherwise).
+
+## Quickstart B: run in a container
+
+The image (`Containerfile`) contains the gateway, `git`, `openssh-client` and the Claude Code CLI **pinned to 2.1.309** (`--build-arg CLAUDE_VERSION=...` to change it). It runs as `appuser` (uid/gid 1001, `HOME=/home/appuser`), keeps skills state in `/var/lib/claudeai-api`, and contains no credentials.
 
 ```bash
-make swagger           # regenerate Swagger docs from Go annotations
-make build             # vet + fmt + tidy + swagger check + build -> build/main
-make binary            # regenerate Swagger docs and build without checks
-make test              # go test -race ./...
-make coverage          # same suite with a coverage profile (coverage.out); prints the total
-make check-swagger     # verify generated Swagger docs are up to date
-./build/main           # run with defaults
+make container            # podman build --format docker ... -> claudeai-api:latest
+# docker: docker build -f Containerfile -t claudeai-api:latest .
 ```
 
-### Key flags
+Run it (rootless podman, verified). Put the token in an env file with mode 600 instead of the command line:
+
+```bash
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' '<token from claude setup-token>' > .env && chmod 600 .env   # .env is git-ignored
+
+podman run -d --name claudeai-api \
+  --userns=keep-id:uid=1001,gid=1001 \
+  --read-only --tmpfs /tmp:rw,mode=1777 --tmpfs /home/appuser:rw,mode=1777 \
+  -v claudeai-state:/var/lib/claudeai-api \
+  -p 127.0.0.1:46564:46564 \
+  --env-file .env \
+  claudeai-api:latest
+```
+
+With skills (read-only deploy key and pinned `known_hosts`, see [Skills](#skills)):
+
+```bash
+S=~/.config/claudeai-api
+podman run -d --name claudeai-api \
+  --userns=keep-id:uid=1001,gid=1001 \
+  --read-only --tmpfs /tmp:rw,mode=1777 --tmpfs /home/appuser:rw,mode=1777 \
+  -v claudeai-state:/var/lib/claudeai-api \
+  -v $S/skills_deploy_key:/run/secrets/skills_deploy_key:ro \
+  -v $S/known_hosts:/run/secrets/known_hosts:ro \
+  -p 127.0.0.1:46564:46564 --env-file .env \
+  claudeai-api:latest \
+  -http-address 0.0.0.0 -internal-address 0.0.0.0 -skills-dir /var/lib/claudeai-api/skills \
+  -skills-repo git@github.com:OWNER/skills-repo.git \
+  -skills-ssh-key /run/secrets/skills_deploy_key -skills-known-hosts /run/secrets/known_hosts
+```
+
+(Arguments after the image name replace the image's default `CMD`, which is why the bind and `-skills-dir` flags are repeated.) `podman ps` shows the health state; `podman logs claudeai-api` shows the sync result.
+
+Notes:
+
+- **Why `--userns=keep-id:uid=1001,gid=1001`.** ssh refuses a private key that is not owned by the user running it. With this option your host user is uid 1001 inside the container, so a key you own (mode 600) is accepted as is, and the `:ro` mount leaves the original untouched. Verified with rootless podman 5.4. The alternative `:U` volume option chowns the host file, so use it only on a copy.
+- **docker.** There is no `keep-id`: copy the key and `known_hosts` to a directory you control, `chown 1001:1001` them, `chmod 0400` the key, mount them `:ro`, and drop `--userns`. Docker has not been exercised for this project (only podman was), so treat these steps as unverified.
+- **`--read-only`.** The root filesystem is read-only; `/tmp`, `/home/appuser` (the CLI writes its config there) and the state volume are the only writable places. podman creates tmpfs mounts root-owned and has no `uid=` option, hence `mode=1777`; the mounts are private to the container. Drop `--read-only` and the tmpfs flags if you prefer.
+- **Ports.** Only the public port is published, and only on `127.0.0.1`. The container binds `0.0.0.0` and may run without API keys, so publishing it on all interfaces (`-p 46564:46564`) without `CLAUDEAI_API_KEYS` exposes your subscription; the startup warning says so. The internal port (9000) is not published; reach it from other containers on the same network (for example Prometheus scraping `claudeai-api:9000`).
+- **Health check.** The image runs `claudeai-api -health-check` (internal port) every 30s. `podman build` must use `--format docker` to keep the `HEALTHCHECK` instruction (`make container` does).
+- **State volume.** `/var/lib/claudeai-api` is a disposable cache (bare clone and materialized skills). It can be a named volume or a tmpfs; losing it only costs one re-clone.
+- **Claude CLI in the image.** Installed from the official release binary (no Node.js), checked against Anthropic's signed manifest: the release signing key must match the pinned fingerprint `31DD DE24 DDFA B679 F42D 7BD2 BAA9 29FF 1A7E CACE`, the detached signature of `manifest.json` must verify against it, and the binary's SHA-256 must match the manifest. Not verified: Linux binaries carry no per-binary code signature. The image sets `DISABLE_UPDATES=1` (the version stays pinned) and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (no telemetry or error reporting), both documented in the Claude Code docs.
+- **Compose.** [`compose.example.yaml`](compose.example.yaml) has the same setup for `podman compose` / `docker compose`, including the scaling notes.
+
+## Authentication
+
+Two separate layers:
+
+1. **Gateway to Claude: `CLAUDE_CODE_OAUTH_TOKEN`.** Run `claude setup-token` once on a machine where you are logged in with your Max subscription; it prints a token that is valid for **one year**. Pass it to every container as an environment variable. To rotate it, run `claude setup-token` again, update the secret and restart the containers (a running process keeps using the old token). When it expires or is revoked requests fail with `502 upstream_auth_error`. If the variable is unset the CLI falls back to its own stored login (convenient locally; there is none in a container).
+2. **Client to gateway: `CLAUDEAI_API_KEYS` (optional).** Comma-separated keys; when set, `/v1` requires `Authorization: Bearer <key>` and answers failures with `401`, `WWW-Authenticate: Bearer` and an OpenAI-style body (`missing_api_key` / `invalid_api_key`). When unset or empty, authentication is **off**. The internal server is never authenticated.
+
+Secrets are read from environment variables, not flags, because flags are visible in process listings (`ps`, `/proc`). They are never logged: the startup log only says whether they are set and how many keys there are. `ANTHROPIC_API_KEY` must not be set: it overrides the subscription login and would bill the API key; the gateway warns if it is set and strips it (and `ANTHROPIC_AUTH_TOKEN`) from the Claude child processes.
+
+```bash
+curl http://127.0.0.1:46564/v1/models                                      # auth disabled
+curl -H "Authorization: Bearer key1" http://127.0.0.1:46564/v1/models      # CLAUDEAI_API_KEYS=key1,key2
+```
+
+## Configuration reference
+
+All configuration is flags, except secrets (environment variables). `./build/main -h` prints the same list.
 
 | Flag | Default | Description |
 |---|---|---|
-| `-http-port` / `-internal-port` | `46564 / 9000` | Server ports |
-| `-http-read-timeout` | `10` | Read timeout in seconds |
-| `-http-write-timeout` | `0` | Public write timeout in seconds (0 disables it, needed for SSE) |
-| `-http-timeout` | `30` | Idle timeout in seconds |
-| `-log-level` / `-log-file-path` | `info / stdout` | Logging |
-| `-o11-tracer-endpoint` | | OTLP gRPC endpoint (e.g. `tempo:4317`) |
+| `-http-address` | `127.0.0.1` | Public bind address. `0.0.0.0` listens on every interface (the container image sets it) |
+| `-http-port` | `46564` | Public port |
+| `-http-timeout` | `30` | Idle timeout in seconds (also used by the internal server) |
+| `-http-read-timeout` | `10` | Read timeout in seconds (also used by the internal server) |
+| `-http-write-timeout` | `0` | Public write timeout in seconds; `0` disables it, needed for SSE (the internal server has a fixed 30s) |
+| `-internal-address` | `127.0.0.1` | Internal bind address (unauthenticated server) |
+| `-internal-port` | `9000` | Internal port |
+| `-log-level` | `info` | `debug`, `info`, `warn`, `error` |
+| `-log-file-path` | `stdout` | Log destination |
+| `-o11-tracer-endpoint` | empty | OTLP gRPC endpoint without scheme (for example `tempo:4317`) |
 | `-o11-prometheus-path` | `/metrics` | Metrics path on the internal server |
 | `-o11-environment` | `dev` | Environment tag in telemetry |
 | `-claude-bin` | `claude` | Claude Code CLI binary name or path |
 | `-claude-model` | `sonnet` | Default model alias when a request names none |
-| `-claude-models` | `sonnet,opus,haiku` | Comma-separated ids advertised by `GET /v1/models` (no empty entries; duplicates removed; the default model is added if missing). Any model the CLI accepts still works in requests |
+| `-claude-models` | `sonnet,opus,haiku` | Ids advertised by `GET /v1/models` (no empty entries; duplicates removed; the default model is added if missing). Any model the CLI accepts still works in requests |
 | `-claude-timeout` | `5m` | Max wall time per request |
-| `-claude-max-concurrency` | `4` | Max simultaneous CLI processes (>= 1) |
-| `-skills-repo` | empty | Git URL of a skills repository (ssh `git@host:o/r.git`, https, `file://` or a local path; URLs with embedded credentials are rejected). Empty disables skills |
+| `-claude-max-concurrency` | `4` | Max simultaneous CLI processes in this process (>= 1) |
+| `-skills-repo` | empty | Git URL of the skills repository (ssh `git@host:o/r.git`, https, `file://` or a local path; URLs with embedded credentials are rejected). Empty disables skills |
 | `-skills-ref` | `main` | Branch, tag or full commit sha to serve |
-| `-skills-dir` | `<user cache dir>/claudeai-api/skills` | State directory (bare clone cache and read-only `versions/<sha>/`) |
+| `-skills-dir` | `<user cache dir>/claudeai-api/skills` | State directory (bare clone cache and read-only `versions/<sha>/`). The image uses `/var/lib/claudeai-api/skills` |
 | `-skills-refresh` | `5m` | Re-sync interval; `0` syncs once at startup; otherwise at least `30s` |
-| `-skills-ssh-key` | empty | Path to a read-only deploy key file for ssh URLs (only the path is configured) |
+| `-skills-ssh-key` | empty | Path to the read-only deploy key for ssh URLs (only the path is configured) |
 | `-skills-known-hosts` | empty | Path to a `known_hosts` file; host keys are always verified |
 | `-skills-sync-timeout` | `2m` | Max wall time of one sync |
 
-Full list: `./build/main -h`
-
-### Secrets and authentication
-
-Secrets are read from environment variables, not flags (flags are visible in process lists). This deliberately deviates from the flags-only convention of the rest of the config.
-
-| Variable | Description |
+| Environment variable | Description |
 |---|---|
-| `CLAUDE_CODE_OAUTH_TOKEN` | Optional. Token from `claude setup-token`. If unset, the CLI uses its own stored login. Never logged. |
-| `CLAUDEAI_API_KEYS` | Optional, comma-separated client API keys. If unset or empty, authentication is **off**. |
-| `ANTHROPIC_API_KEY` | Do not set: it overrides the subscription login and bills the API key. The service warns if it is set. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Token from `claude setup-token` (one year). Optional locally, required in a container. Never logged |
+| `CLAUDEAI_API_KEYS` | Optional comma-separated client API keys. Unset or empty means authentication is off |
+| `ANTHROPIC_API_KEY` | Do not set (see [Authentication](#authentication)) |
 
-When keys are configured, the `/v1` API requires `Authorization: Bearer <key>` and answers failures with `401`, `WWW-Authenticate: Bearer` and an OpenAI-style body (`missing_api_key` / `invalid_api_key`). The internal server (health, version, metrics, Swagger) is never authenticated. With auth disabled and a non-loopback `-http-address` the service logs a warning at startup; for local-only use pass `-http-address 127.0.0.1`.
-
-```bash
-# auth disabled (no CLAUDEAI_API_KEYS)
-curl http://127.0.0.1:46564/v1/models
-
-# auth enabled (CLAUDEAI_API_KEYS=key1,key2)
-curl -H "Authorization: Bearer key1" http://127.0.0.1:46564/v1/models
-```
+The child `claude` processes inherit the gateway environment (minus the two variables above), so Claude Code's own settings variables, for example `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, apply to them too.
 
 ## API
 
-OpenAI clients use the base URL `http://<host>:<http-port>/v1` (public server). Same auth rules as above.
+OpenAI clients use the base URL `http://<host>:<http-port>/v1` (public server). Same auth rules as above. Swagger UI for the whole service is on the internal server at `/api/v1/docs` (generated by [swaggo/swag](https://github.com/swaggo/swag), `make swagger`).
 
 | Endpoint | Description |
 |---|---|
@@ -96,17 +217,20 @@ OpenAI clients use the base URL `http://<host>:<http-port>/v1` (public server). 
 | `GET /v1/models/{model}` | One advertised model, or 404 `model_not_found` |
 | `POST /v1/chat/completions` | Chat completion, JSON or SSE (`stream: true`) |
 
-Internal server (never expose it publicly): `GET /api/v1/skills`, `POST /api/v1/skills/refresh` (see [Skills](#skills)).
-
 ### Chat completions request fields
 
-- **Used**: `model` (empty uses `-claude-model`; passed to the CLI as is, so aliases and full ids work), `messages` (required), `stream` (SSE when `true`), `stream_options.include_usage` (only with `stream: true`).
-- **Messages**: roles `system` and `developer` are merged (in order, blank-line separated) into the system prompt; `user` and `assistant` form the conversation, which must end with a non-empty `user` message. `content` is a string or an array of `{"type":"text","text":...}` parts (joined with newlines).
-- **Ignored without error** (not echoed): `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, `presence_penalty`, `frequency_penalty`, `seed`, `user`, `response_format`, `logit_bias`, `metadata`, and any unknown field.
-- **Rejected with 400**: `tools`/`functions`, `tool_calls`/`function_call` and `tool`/`function` roles (`unsupported_parameter`; tool calling is not supported), `n` > 1 (`unsupported_parameter`), content parts other than text (`unsupported_content_type`).
-- Body limit 8 MiB (`413 request_too_large`).
+| Field | Support |
+|---|---|
+| `model` | Used. Empty uses `-claude-model`; passed to the CLI as is, so aliases and full ids work |
+| `messages` | Used, required. Roles `system` and `developer` are merged (in order, blank-line separated) into the system prompt; `user` and `assistant` form the conversation, which must end with a non-empty `user` message. `content` is a string or an array of `{"type":"text","text":...}` parts (joined with newlines) |
+| `stream` | Used: SSE when `true` |
+| `stream_options.include_usage` | Used, only with `stream: true` |
+| `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, `presence_penalty`, `frequency_penalty`, `seed`, `user`, `response_format`, `logit_bias`, `metadata`, any unknown field | Ignored without error (not echoed) |
+| `tools`, `functions`, `tool_calls`, `function_call`, roles `tool` / `function` | Rejected: 400 `unsupported_parameter` |
+| `n` > 1 | Rejected: 400 `unsupported_parameter` |
+| Content parts other than text (images, audio) | Rejected: 400 `unsupported_content_type` |
 
-- Trailing data after the JSON body is rejected (`invalid_json`); whitespace is fine.
+Body limit 8 MiB (`413 request_too_large`). Trailing data after the JSON body is rejected (`invalid_json`); whitespace is fine.
 
 Response: `chat.completion` with one choice. `finish_reason` is `length` when Claude stopped on `max_tokens`, otherwise `stop`. `usage.prompt_tokens` = input + cache creation + cache read tokens.
 
@@ -162,25 +286,6 @@ for chunk in stream:
         print(chunk.choices[0].delta.content, end="", flush=True)
 ```
 
-```bash
-# auth disabled
-curl -s http://127.0.0.1:46564/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"haiku","messages":[{"role":"user","content":"Reply with the single word OK"}]}'
-
-# auth enabled (CLAUDEAI_API_KEYS=key1)
-curl -s http://127.0.0.1:46564/v1/chat/completions -H 'Authorization: Bearer key1' \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"sonnet","messages":[{"role":"system","content":"Be brief."},{"role":"user","content":"Hi"}]}'
-```
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://127.0.0.1:46564/v1", api_key="anything")  # use a real key when auth is enabled
-r = client.chat.completions.create(model="haiku", messages=[{"role": "user", "content": "Hi"}])
-print(r.choices[0].message.content)
-```
-
 ## Skills
 
 Optional. Skills (Claude Code `SKILL.md` folders) live in a **separate private git repository** laid out as a plugin marketplace (`.claude-plugin/marketplace.json` -> `plugins/<plugin>/skills/<name>/SKILL.md`). The gateway clones it with the `git` binary, validates it and serves the skills to every `claude -p` run. Skills stay **disabled** unless `-skills-repo` is set; with skills disabled, with no successful sync yet, or with a repository that has zero valid skills, requests run exactly as before.
@@ -208,14 +313,14 @@ chmod 600 skills_deploy_key
 ```
 
 ```bash
-./build/main -http-address 127.0.0.1 \
+./build/main \
   -skills-repo git@github.com:OWNER/skills-repo.git \
   -skills-ssh-key ~/.config/claudeai-api/skills_deploy_key \
   -skills-known-hosts ~/.config/claudeai-api/known_hosts \
   -skills-dir /var/lib/claudeai-api/skills
 ```
 
-Only the key **path** is configured and logged; the key content is never read by the gateway, logged or returned. Host keys are always verified (`StrictHostKeyChecking=yes`). A missing key or known_hosts file stops startup with an error; a transient git failure only logs a warning and the last good snapshot stays in use.
+In a container, mount both files read-only under `/run/secrets/` as shown in [Quickstart B](#quickstart-b-run-in-a-container). Only the key **path** is configured and logged; the key content is never read by the gateway, logged or returned. Host keys are always verified (`StrictHostKeyChecking=yes`). A missing key or known_hosts file stops startup with an error; a transient git failure only logs a warning and the last good snapshot stays in use.
 
 ### Refresh and status (internal server)
 
@@ -228,42 +333,12 @@ curl -X POST http://127.0.0.1:9000/api/v1/skills/refresh   # 202 {"status":"trig
 
 `POST .../refresh` is non-blocking and coalesced; poll `GET .../skills` for the new commit (for example from a repository webhook relay). Both endpoints are **unauthenticated, like health and metrics**: the internal port must never be exposed publicly. When skills are disabled `GET` answers `{"enabled":false}`.
 
-### Threat model
-
-- The deploy key is read-only and scoped to the one repository; a leaked key allows reading that repository only.
-- The skills repository is trusted input: its skill text is given to the model, so a compromised repository can inject prompts (prompt injection). The model only has the Skill tool (no shell, no files, no network tools), which bounds what an injected prompt can do, but it can shape answers. Review skill changes like code.
-- The CLI reads project settings from its working directory **and its ancestors**: keep `-skills-dir` in a dedicated directory with no `CLAUDE.md` or `.claude/settings*` above it.
-- The syncer never executes repository content (bare clone, `ls-tree`/`cat-file`, no checkout, hooks or symlinks).
-- Container note: the image needs `git` and `openssh-client` for ssh remotes (the Containerfile is handled in T8).
-
-## API documentation
-
-Swagger UI is served on the **internal server** at `/api/v1/docs`. The spec is generated from Go annotations using [swaggo/swag](https://github.com/swaggo/swag) (`make swagger`).
-
-## Container
-
-```bash
-make container   # podman build -t claudeai-api:dev
-```
-
-## CI/CD
-
-- **CI** (`.github/workflows/ci.yml`): vet, fmt, govulncheck, `go mod tidy` check, Swagger drift check, build, `go test -race` with a coverage profile, container build verification
-- **Release** (`.github/workflows/release.yml`): on tag `vX.Y.Z` - validates semver, runs tests, builds and pushes the container to `ghcr.io` with tags `vX.Y.Z`, `X.Y`, `X`, `latest`, and creates a GitHub release
-
-```bash
-git tag v0.1.0 && git push origin v0.1.0
-```
-
-### Test coverage
-
-The coverage badge is refreshed by CI on every push to `main`: the `coverage-badge` job publishes `coverage.json` to the `badges` branch, which the badge reads. The figure excludes the generated `docs` package, and `make coverage` reproduces it locally.
-
 ## Observability
 
 - **Traces**: OTLP gRPC (`-o11-tracer-endpoint tempo:4317`), see [Traces](#traces).
 - **Logs**: slog logs with `trace_id` / `span_id` injected from the request or run context (also `Skills refresh requested`, sync and run logs). Prompts, message content and key paths are never logged.
 - **Metrics**: Prometheus on the internal server (`-o11-prometheus-path`, default `/metrics`), see below.
+- **Dashboard and alerts**: [`grafana/`](grafana/README.md) has a Grafana dashboard (Claude runs, tokens and cost, skills, HTTP, system) and example Prometheus alert rules (`grafana/alerts.example.yml`). `go test ./grafana/` fails if the dashboard or the alerts reference a metric or label that the app does not expose.
 
 ### Metrics
 
@@ -293,8 +368,6 @@ The `skills_*` instruments exist only when `-skills-repo` is set. There is no `c
 
 **Cardinality rule.** A label value may only come from a bounded set. Client-controlled strings (the `model` field of a request, skill names the model emits) must never create series: `model` is the model id the CLI reports when it ran (a bounded set of real ids), otherwise the requested model only if it is in `-claude-models` or is the default model, else `other`; `skill` is a loaded skill name or `other`; `outcome` and `type` are fixed enums. New labels must follow the same rule (normalize in `app/metrics.go`, test the normalizer). Observers are cheap, non-blocking and panic-safe; a metrics bug cannot fail a request or a sync.
 
-A Grafana dashboard and example Prometheus alert rules for these metrics are in [`grafana/`](grafana/README.md). `go test ./grafana/` fails if the dashboard or the alerts reference a metric or label that the app does not expose.
-
 ### Traces
 
 One request is one trace: the `otelhttp` server span (`POST /v1/chat/completions`) is the parent of `claude.run` (same trace id), streaming or not. Skill syncs are their own traces (`skills.sync`, started by the sync loop or by `POST /api/v1/skills/refresh`).
@@ -303,7 +376,72 @@ One request is one trace: the `otelhttp` server span (`POST /v1/chat/completions
 
 ### Forwarding the Claude Code CLI's own telemetry (optional)
 
-The gateway builds each child's environment from its own (`os.Environ`, minus `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`, see `filterEnv` in `services/claude/render.go`), so variables set on the gateway process reach `claude -p` with no code change. For example `CLAUDE_CODE_ENABLE_TELEMETRY=1` with `OTEL_METRICS_EXPORTER=otlp`, `OTEL_LOGS_EXPORTER=otlp` and `OTEL_EXPORTER_OTLP_ENDPOINT=...` makes every run export the CLI's metrics and log events. Traces from the CLI are beta (`CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`). Prompt logging stays off unless you enable it explicitly (`OTEL_LOG_USER_PROMPTS=1`); do not enable it here, since prompts would leave the gateway. This duplicates part of the data above (tokens, cost, duration) from a second source and adds one export per short-lived process; check the current CLI documentation for the exact variable names before relying on them.
+The gateway builds each child's environment from its own (`os.Environ`, minus `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`, see `filterEnv` in `services/claude/render.go`), so variables set on the gateway process reach `claude -p` with no code change. For example `CLAUDE_CODE_ENABLE_TELEMETRY=1` with `OTEL_METRICS_EXPORTER=otlp`, `OTEL_LOGS_EXPORTER=otlp` and `OTEL_EXPORTER_OTLP_ENDPOINT=...` makes every run export the CLI's metrics and log events. Prompt logging stays off unless you enable it explicitly (`OTEL_LOG_USER_PROMPTS=1`); do not enable it here, since prompts would leave the gateway. This duplicates part of the data above from a second source and adds one export per short-lived process; check the current CLI documentation for the exact variable names before relying on them. The container image sets `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`; override it with `-e` if you want the CLI's own telemetry.
+
+## Operations
+
+- **Scaling to N containers.** Run as many replicas as you like behind any load balancer: there is no session, memory or shared state, and every container needs only the same `CLAUDE_CODE_OAUTH_TOKEN` (and, optionally, the same API keys and skills repo). Each replica syncs skills on its own. See `compose.example.yaml`.
+- **Concurrency.** `-claude-max-concurrency` (default 4) limits simultaneous `claude` processes **per container**; extra requests get `429 server_busy` with `Retry-After: 1` (raise the limit, or put a queue or retry in the client). Total parallelism is replicas times the limit. All containers draw on the **same Max usage limits**, so more replicas do not add capacity at Anthropic; hitting the limit shows up as `429 rate_limit_exceeded`. Budget roughly 300-500 MB of RAM per running process.
+- **Timeouts.** `-claude-timeout` (default 5m) bounds a whole request (504 `upstream_timeout`; the CLI process group is killed). `-http-read-timeout` (10s) covers reading the request; the public write timeout is off so streams are not cut.
+- **Shutdown.** On SIGINT/SIGTERM both servers stop gracefully (30s), the skills syncer is cancelled, running CLI processes are bounded by their request context and the backend's temp directories are removed. Give the orchestrator a stop grace period of at least 30s.
+- **Health.** `GET /api/v1/health` on the internal port; `claudeai-api -health-check [port]` (used by the image `HEALTHCHECK`; port defaults to 9000) exits 0 when it answers 200. Health does not call Claude, so it cannot detect an expired token: alert on `claude_runs_total{outcome="auth"}` instead (see `grafana/alerts.example.yml`).
+- **Token rotation.** Every year (or when revoked): `claude setup-token`, update the secret, restart the containers one by one.
+
+## Troubleshooting
+
+| Symptom | Likely cause and fix |
+|---|---|
+| `502 upstream_auth_error` | The OAuth token is missing, expired or revoked. Run `claude setup-token`, update `CLAUDE_CODE_OAUTH_TOKEN`, restart. Check that the container actually has the variable (`oauth_token_set=true` in the startup log) |
+| `429 server_busy` | All `-claude-max-concurrency` slots are in use. Raise the limit (mind RAM and your usage limits), retry after `Retry-After`, or add a client-side queue |
+| `429 rate_limit_exceeded` | Your Max usage limit is reached (shared with Claude Code and every other container using the login). Wait for the window to reset |
+| `504 upstream_timeout` | The request exceeded `-claude-timeout`; raise it for very long generations |
+| `404 model_not_found` | The model name is unknown to the CLI; use `sonnet`, `opus`, `haiku` or a full model id |
+| Skills not loading | `curl http://127.0.0.1:9000/api/v1/skills` (inside the container network): check `enabled`, `commit`, `skipped` reasons and the sync error in the logs. Typical causes: deploy key not readable by uid 1001 or not mode 0600/0400 (see `--userns=keep-id` above), `known_hosts` missing the git host, wrong `-skills-ref`, skill `name` not equal to its directory |
+| Startup error about the skills key or `known_hosts` | The path passed to `-skills-ssh-key` / `-skills-known-hosts` does not exist inside the container; check the `:ro` mounts |
+| `mkdir ... permission denied` for the skills dir | The state directory is not writable by uid 1001: use a named volume, or a tmpfs with `mode=1777` |
+| Streaming stalls or arrives in one burst behind a proxy | Disable proxy buffering and raise the read timeout (nginx: `proxy_buffering off; proxy_read_timeout 300s;`); there is no heartbeat |
+| Warning "API is unauthenticated and reachable beyond localhost" | Auth is off and the bind is not loopback. In a container this is expected (it binds `0.0.0.0`): publish the port on `127.0.0.1` only, or set `CLAUDEAI_API_KEYS` |
+| Container shows no health status | The image was built with podman's default OCI format, which drops `HEALTHCHECK`: build with `--format docker` (`make container`) |
+
+## Limits and non-goals
+
+- Stateless by design: no conversation storage, sessions or memory; the client sends the full history.
+- No tool/function calling, no images or audio, no `n` > 1, no logprobs; sampling parameters are ignored.
+- Streaming has no heartbeat; usage numbers sum every turn of the run.
+- Not a multi-user service: one subscription, personal use, concurrency-limited.
+
+## Security notes
+
+- **Secrets** are environment variables only (never flags, never logged). Keep `.env` mode 600 and out of git; prefer your orchestrator's secret store.
+- **Bind addresses** default to loopback. The container binds `0.0.0.0`; publish the public port on `127.0.0.1` or behind a TLS reverse proxy with `CLAUDEAI_API_KEYS` set.
+- **Internal port** (health, version, metrics, Swagger, skills status/refresh) has **no authentication** and must stay on a private network. Do not publish it.
+- **Claude isolation.** Each run is a fresh `claude -p` with `--setting-sources`, `--strict-mcp-config`, `--no-chrome` and no tools (`--tools ""`, or only `Skill` when skills are active), `ANTHROPIC_API_KEY` stripped, in its own process group killed on timeout.
+- **Deploy key** is read-only and scoped to the one skills repository; a leaked key allows reading that repository only. Mount it `:ro`.
+- **Skills trust model.** The skills repository is trusted input: its skill text is given to the model, so a compromised repository can inject prompts. The model only has the Skill tool (no shell, files or network tools), which bounds what an injected prompt can do, but it can shape answers. Review skill changes like code. The syncer never executes repository content (bare clone, `ls-tree`/`cat-file`, no checkout, hooks or symlinks).
+- The CLI reads project settings from its working directory **and its ancestors**: keep `-skills-dir` in a dedicated directory with no `CLAUDE.md` or `.claude/settings*` above it (the image uses `/var/lib/claudeai-api/skills`).
+
+## Development
+
+```bash
+make run               # go run ./cmd on loopback
+make test              # go test -race -count=1 ./...
+make coverage          # same suite with a coverage profile (coverage.out); prints the total
+make swagger           # regenerate docs/ after changing handler annotations (swag pinned in go.mod)
+make check-swagger     # fails if docs/ is stale (what CI runs)
+make vulncheck         # govulncheck ./... (install govulncheck separately)
+make ci                # the CI checks locally, without modifying files (all but the container build)
+make build             # vet + fmt + tidy + swagger check + build -> build/main (modifies files)
+make container         # podman build --format docker -> claudeai-api:latest (CLAUDE_VERSION=x.y.z to re-pin the CLI)
+make container-run     # run the image on 127.0.0.1:46564 using ./.env
+```
+
+Tests use only the standard library (`testing`, `httptest`, table-driven) and a re-exec **fake `claude` executable**: they need no real CLI, network or secrets, so CI runs on a plain GitHub runner (only `git` is used, by the skills syncer tests). Opt-in real-world tests: `CLAUDEAI_INTEGRATION=1` (real CLI) and `CLAUDEAI_SKILLS_E2E=1` with `CLAUDEAI_SKILLS_E2E_REPO/_KEY/_KNOWN_HOSTS` (real skills repo).
+
+**CI** (`.github/workflows/ci.yml`): vet, gofmt, govulncheck, `go mod tidy -diff`, Swagger drift check, build, `go test -race` with coverage (the generated `docs` package is excluded), then a container build with a smoke test of `claude`, `git` and `ssh` in the image. On pushes to `main` the `coverage-badge` job publishes `coverage.json` to the orphan `badges` branch for the badge. **Release** (`release.yml`) triggers on tags `vX.Y.Z` (`git tag v0.1.0 && git push origin v0.1.0`): runs the checks, pushes the image to `ghcr.io/<owner>/<repo>` with tags `vX.Y.Z`, `X.Y`, `X`, `latest` and creates a GitHub release. `vulncheck.yml` runs govulncheck weekly. The Go version comes from the `go` directive in `go.mod`; the Containerfile builder image (`golang:1.27.2-bookworm`) must be bumped together with it.
+
+**Adding a metric.** Create the instrument in `o11/metrics_claude.go` (or the relevant factory) with a bounded label set, feed it from the adapters in `app/metrics.go`, add it to the exposition test `o11/metrics_claude_test.go`, add a panel (and, if relevant, an alert) in `grafana/`, document it in the table above and keep `go test ./grafana/` green.
+
+Architecture rules and conventions for contributors and coding agents are in [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md).
 
 ## License
 

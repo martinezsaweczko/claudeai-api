@@ -1,0 +1,105 @@
+# Example for `podman compose` / `docker compose`. Copy to compose.yaml and adapt.
+#
+#   1. Build or pull the image (see README): `make container` builds claudeai-api:latest.
+#   2. Create ./.env (git-ignored, mode 600) with your secrets, never commit it:
+#        CLAUDE_CODE_OAUTH_TOKEN=<output of `claude setup-token`>
+#        CLAUDEAI_API_KEYS=<optional, comma-separated client keys>
+#   3. Put the read-only deploy key and pinned known_hosts where `secrets_dir` below points.
+#
+# Personal use only: one Claude Max subscription, your own traffic. Usage limits are
+# shared by every container running with the same token.
+
+services:
+  gateway:
+    image: claudeai-api:latest
+    # `make container` tags this name. Use your own registry tag if you push elsewhere.
+
+    # Secrets come from the environment, not from flags (flags show up in `ps`).
+    env_file: .env
+
+    # The image already passes -http-address 0.0.0.0 -internal-address 0.0.0.0
+    # -skills-dir /var/lib/claudeai-api/skills. Flags given here REPLACE that CMD,
+    # so repeat the three above when you override it.
+    command:
+      - -http-address=0.0.0.0
+      - -internal-address=0.0.0.0
+      - -skills-dir=/var/lib/claudeai-api/skills
+      - -claude-max-concurrency=4        # simultaneous claude processes PER CONTAINER
+      - -claude-timeout=5m
+      # Skills (optional): remove these four lines to run without skills.
+      - -skills-repo=git@github.com:OWNER/skills-repo.git
+      - -skills-ssh-key=/run/secrets/skills_deploy_key
+      - -skills-known-hosts=/run/secrets/known_hosts
+      - -skills-refresh=5m
+
+    # Public port on the host loopback ONLY. The container binds 0.0.0.0 without
+    # keys, so never publish it as "46564:46564" unless CLAUDEAI_API_KEYS is set.
+    # The internal port (9000: health, metrics, unauthenticated skills endpoints)
+    # is deliberately NOT published; reach it from the compose network
+    # (for example a Prometheus service scraping gateway:9000).
+    ports:
+      - "127.0.0.1:46564:46564"
+
+    volumes:
+      # Disposable skills cache (bare clone + materialized versions).
+      - skills-state:/var/lib/claudeai-api
+      # Read-only secrets. The files must be readable by uid 1001 (the image user)
+      # and the key must be mode 0600/0400, or ssh refuses it.
+      #   rootless podman: run with `userns_mode: "keep-id:uid=1001,gid=1001"`
+      #     (below); files owned by your user are then owned by uid 1001 inside.
+      #   docker: copy both files to a root-controlled dir and
+      #     `chown 1001:1001 <dir>/* && chmod 0400 <dir>/skills_deploy_key`.
+      - ${SECRETS_DIR:-./secrets}/skills_deploy_key:/run/secrets/skills_deploy_key:ro
+      - ${SECRETS_DIR:-./secrets}/known_hosts:/run/secrets/known_hosts:ro
+
+    # Rootless podman only (verified): remove this line when using docker.
+    userns_mode: "keep-id:uid=1001,gid=1001"
+
+    # Hardening: read-only root filesystem with writable scratch areas. The Claude
+    # CLI writes config/cache under $HOME and the gateway creates temp dirs in /tmp.
+    # (1777 because tmpfs mounts are created root-owned and tmpfs has no uid option
+    # in podman; the mounts are private to this container.)
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /home/appuser:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+    restart: unless-stopped
+
+    # Uses the image's binary; slim images have no curl.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/claudeai-api", "-health-check"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+    # Resource hints: each in-flight request is one claude process (roughly
+    # 300-500 MB RSS each). Size memory as ~512M + 512M * -claude-max-concurrency.
+    # `deploy.resources` is honored by docker compose; podman compose may need
+    # `mem_limit` / `cpus` instead.
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2560M
+
+  # --- Scaling out ---------------------------------------------------------
+  # The service is stateless (the client sends the whole conversation every time),
+  # so any container can serve any request. To run N replicas behind a load
+  # balancer (nginx, Caddy, Traefik, ...):
+  #   - drop the fixed host port above and let the balancer reach gateway:46564
+  #     on the compose network, or give each replica its own host port;
+  #   - `docker compose up -d --scale gateway=3` (replicas share the same .env);
+  #   - for SSE, disable proxy buffering and raise the read timeout
+  #     (nginx: proxy_buffering off; proxy_read_timeout 300s);
+  #   - total parallelism = replicas * -claude-max-concurrency, but your Max usage
+  #     limits are shared across ALL containers: more replicas do not add capacity
+  #     at Anthropic, they only add local parallelism.
+  # Each replica syncs the skills repository on its own (volume per replica).
+
+volumes:
+  skills-state:

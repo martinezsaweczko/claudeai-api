@@ -85,14 +85,14 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 	var skillsRefresh, skillsSyncTimeout time.Duration
 
 	// Flags public API server
-	flag.StringVar(&serverAddress, "http-address", "0.0.0.0", "Public API server address")
+	flag.StringVar(&serverAddress, "http-address", "127.0.0.1", "Public API server bind address (0.0.0.0 listens on every interface; the container image passes it explicitly)")
 	flag.IntVar(&serverPort, "http-port", 46564, "Public API server port")
 	flag.IntVar(&serverTimeout, "http-timeout", 30, "HTTP server timeout in seconds")
 	flag.IntVar(&serverReadTimeout, "http-read-timeout", 10, "HTTP server read timeout in seconds")
 	flag.IntVar(&serverWriteTimeout, "http-write-timeout", 0, "Public server write timeout in seconds (0 disables it, required for long-lived SSE streaming responses)")
 
 	// Flags internal server
-	flag.StringVar(&internalAddress, "internal-address", "0.0.0.0", "Internal API server address")
+	flag.StringVar(&internalAddress, "internal-address", "127.0.0.1", "Internal API server bind address (unauthenticated: health, metrics, skills; keep it private)")
 	flag.IntVar(&internalPort, "internal-port", 9000, "Internal API server port")
 
 	// Flags log

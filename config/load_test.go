@@ -38,6 +38,11 @@ func TestLoadConfig(t *testing.T) {
 		if cfg.HttpServer.Port != 46564 || cfg.InternalServer.Port != 9000 {
 			t.Errorf("default ports = %d/%d, want 46564/9000", cfg.HttpServer.Port, cfg.InternalServer.Port)
 		}
+		// Secure by default: both servers listen on loopback unless told otherwise
+		// (the container passes 0.0.0.0 explicitly).
+		if cfg.HttpServer.Address != "127.0.0.1" || cfg.InternalServer.Address != "127.0.0.1" {
+			t.Errorf("default addresses = %q/%q, want 127.0.0.1/127.0.0.1", cfg.HttpServer.Address, cfg.InternalServer.Address)
+		}
 		// Streaming responses need the public write timeout disabled by default.
 		if cfg.HttpServer.WriteTimeout != 0 {
 			t.Errorf("public write timeout = %d, want 0 (disabled for SSE)", cfg.HttpServer.WriteTimeout)

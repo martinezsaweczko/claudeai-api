@@ -6,22 +6,25 @@ APP_NAME := claudeai-api
 LDFLAGS := -X main.version=$(VERSION) -X main.buildTime=$(BUILD_TIME) -X main.appName=$(APP_NAME)
 
 imageTag := claudeai-api
-SWAG := $(shell go env GOPATH)/bin/swag
+# swag runs from the version pinned in go.mod (tools/tools.go), so local and CI output match.
+SWAG := go run github.com/swaggo/swag/cmd/swag
 
-.PHONY: build binary check check-swagger ci clean container coverage coverage-total run swagger test vulncheck
+.PHONY: build binary check check-swagger ci clean container container-run coverage coverage-total run swagger test vulncheck
 
 # Coverage profile. The generated swagger package (docs/) is excluded because
 # it is swag output, not authored code.
 COVERAGE_PROFILE := coverage.out
 COVERAGE_EXCLUDE := /docs/
 
+# swag emits an unformatted docs.go; gofmt keeps it identical to what CI checks.
 swagger:
 	$(SWAG) init -g cmd/main.go -o docs
+	gofmt -w docs/docs.go
 
 check-swagger:
-	@rm -rf /tmp/docs
-	$(SWAG) init -g cmd/main.go -o /tmp/docs
-	@diff -r docs /tmp/docs || (echo "Swagger docs are out of date. Run 'make swagger' and commit the changes." && exit 1)
+	@tmp="$$(mktemp -d)/docs"; mkdir -p "$$tmp"; trap 'rm -rf "$$(dirname "$$tmp")"' EXIT; \
+	$(SWAG) init -g cmd/main.go -o "$$tmp" && gofmt -w "$$tmp/docs.go" && \
+	diff -r docs "$$tmp" || (echo "Swagger docs are out of date. Run 'make swagger' and commit the changes." && exit 1)
 
 build: clean check check-swagger
 	go build -ldflags "$(LDFLAGS)" -o build/main cmd/main.go
@@ -53,8 +56,10 @@ coverage-total:
 clean:
 	rm -rf build
 
-run: build
-	./build/main
+# Local run on loopback with the defaults (public :46564, internal :9000).
+# Needs the `claude` CLI on PATH; export CLAUDE_CODE_OAUTH_TOKEN first (see README).
+run:
+	go run ./cmd
 
 vulncheck:
 	govulncheck ./...
@@ -69,10 +74,18 @@ ci: vulncheck check-swagger
 	go build ./...
 	go test -race -count=1 ./...
 
+# Pin the Claude Code CLI with `make container CLAUDE_VERSION=x.y.z` (default: Containerfile).
 container:
-	podman build -f Containerfile \
+	podman build --format docker -f Containerfile \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg BUILD_TIME=$(BUILD_TIME) \
+		$(if $(CLAUDE_VERSION),--build-arg CLAUDE_VERSION=$(CLAUDE_VERSION)) \
 		-t $(imageTag):$(VERSION) \
 		-t $(imageTag):latest \
 		.
+
+# Runs the image on 127.0.0.1:46564 only. Put CLAUDE_CODE_OAUTH_TOKEN (and
+# optionally CLAUDEAI_API_KEYS) in ./.env (git-ignored); see compose.example.yaml.
+container-run:
+	podman run --rm --name claudeai-api -p 127.0.0.1:46564:46564 \
+		--env-file .env $(imageTag):latest

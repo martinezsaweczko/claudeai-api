@@ -13,7 +13,7 @@ go build ./...   # compile
 go vet ./...     # static analysis
 gofmt -l .       # must output nothing
 go test ./...    # unit tests (use -race for CI parity)
-make container   # podman image build
+make container   # podman image build (--format docker keeps HEALTHCHECK); CLAUDE_VERSION=x.y.z re-pins the CLI
 ```
 
 Before committing, ALL of: `go build ./...`, `go vet ./...`, `gofmt -l .` empty, `go test ./...` green.
@@ -58,11 +58,14 @@ Before committing, ALL of: `go build ./...`, `go vet ./...`, `gofmt -l .` empty,
 
 ## CI/CD
 
-- CI (`.github/workflows/ci.yml`) runs on push/PR: vet, fmt, govulncheck, tidy check, build, `go test -race` through `make coverage` (writes `coverage.out` without the generated `docs` package and reports the total in the job summary), container build. On pushes to `main`, the `coverage-badge` job publishes `coverage.json` to the orphan `badges` branch for the README badge.
+- CI (`.github/workflows/ci.yml`) runs on push/PR: vet, fmt, govulncheck, tidy check, build, `go test -race` through `make coverage` (writes `coverage.out` without the generated `docs` package and reports the total in the job summary), container build plus a smoke test of `claude`, `git`, `ssh` inside the image. On pushes to `main`, the `coverage-badge` job publishes `coverage.json` to the orphan `badges` branch for the README badge.
 - `make ci` runs the CI checks locally (all but the container build) without modifying files. The Go version comes from the `go` directive in `go.mod` in every workflow; `govulncheck` also runs weekly on `main` (`.github/workflows/vulncheck.yml`).
 - Release (`.github/workflows/release.yml`) triggers on semver tags `vX.Y.Z`: pushes the container to `ghcr.io/<owner>/<repo>` with `vX.Y.Z / X.Y / X / latest` tags and creates a GitHub release. Tag releases with `git tag vX.Y.Z` only.
 
 ## Operational notes
 
 - Health check: `claudeai-api -health-check [port]` (used by the Containerfile HEALTHCHECK; port defaults to 9000).
+- **Secure-default bind**: `-http-address` and `-internal-address` default to `127.0.0.1`. The container CMD passes `0.0.0.0` explicitly; publish the public port on `127.0.0.1` only (or set `CLAUDEAI_API_KEYS`). Do not change the defaults back to `0.0.0.0` (`config/load_test.go` asserts them).
+- **Container** (`Containerfile`): 3 stages (verified Claude Code CLI download, Go build, `debian:bookworm-slim` runtime with `git` + `openssh-client`), user `appuser` uid/gid 1001, `HOME=/home/appuser`, skills state `/var/lib/claudeai-api`, secrets mounted read-only under `/run/secrets/`. The CLI version is pinned by `ARG CLAUDE_VERSION` and checked against Anthropic's GPG-signed manifest (key fingerprint pinned in the file). The builder image tag (`golang:1.27.2-bookworm`) must satisfy the `go` directive in `go.mod`. `compose.example.yaml` and the README "Quickstart B" hold the verified run commands (rootless podman needs `--userns=keep-id:uid=1001,gid=1001` for the deploy key).
+- `make check-swagger` runs swag from the version pinned in `go.mod` (`go run`) and gofmt-formats `docs.go` before diffing; use `make swagger` to regenerate.
 - The internal server (health, version, metrics, Swagger) has no authentication and must not be exposed publicly.

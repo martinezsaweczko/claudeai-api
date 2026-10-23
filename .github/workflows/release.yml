@@ -33,9 +33,6 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install swag
-        run: go install github.com/swaggo/swag/cmd/swag@latest
-
       - name: Verify Swagger docs are up to date
         run: make check-swagger
 
