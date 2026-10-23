@@ -189,10 +189,10 @@ paths:
       consumes:
       - application/json
       description: |-
-        OpenAI-compatible, non-streaming chat completion backed by the Claude Code CLI.
-        Used fields: model (empty uses the server default), messages (string or text-part content; roles system, developer, user, assistant), stream (must be false or absent).
-        Ignored without error: temperature, top_p, max_tokens, max_completion_tokens, stop, presence_penalty, frequency_penalty, seed, user, stream_options, response_format, logit_bias, metadata.
-        Rejected with 400: tools/functions/tool_calls/function_call and tool or function roles (unsupported_parameter), n > 1 (unsupported_parameter), stream true (streaming_not_supported), non-text content parts (unsupported_content_type).
+        OpenAI-compatible chat completion backed by the Claude Code CLI. With stream true the response is a text/event-stream of chat.completion.chunk events ending with data: [DONE].
+        Used fields: model (empty uses the server default), messages (string or text-part content; roles system, developer, user, assistant), stream (SSE when true), stream_options.include_usage (final usage chunk).
+        Ignored without error: temperature, top_p, max_tokens, max_completion_tokens, stop, presence_penalty, frequency_penalty, seed, user, response_format, logit_bias, metadata.
+        Rejected with 400: tools/functions/tool_calls/function_call and tool or function roles (unsupported_parameter), n > 1 (unsupported_parameter), non-text content parts (unsupported_content_type).
       parameters:
       - description: Chat completion request
         in: body
@@ -202,6 +202,7 @@ paths:
           $ref: '#/definitions/handlers.chatRequestDoc'
       produces:
       - application/json
+      - text/event-stream
       responses:
         "200":
           description: OK

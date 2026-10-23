@@ -7,7 +7,7 @@
 
 OpenAI-compatible HTTP API (`/v1/models`, `/v1/chat/completions`, including SSE streaming) backed by the Claude Code CLI. The service is stateless: the client sends the full conversation on every request and each request runs a fresh `claude` process. Personal use only.
 
-> Status: `GET /v1/models` and non-streaming `POST /v1/chat/completions` are implemented. SSE streaming (`stream: true`) is not available yet and is rejected with `400 streaming_not_supported`.
+> Status: `GET /v1/models` and `POST /v1/chat/completions` (including SSE streaming with `stream: true`) are implemented.
 
 ## Architecture
 
@@ -87,15 +87,17 @@ OpenAI clients use the base URL `http://<host>:<http-port>/v1` (public server). 
 |---|---|
 | `GET /v1/models` | `{"object":"list","data":[{"id","object":"model","created","owned_by":"anthropic"}]}`. Ids come from `-claude-models`; `created` is the process start time |
 | `GET /v1/models/{model}` | One advertised model, or 404 `model_not_found` |
-| `POST /v1/chat/completions` | Non-streaming chat completion |
+| `POST /v1/chat/completions` | Chat completion, JSON or SSE (`stream: true`) |
 
 ### Chat completions request fields
 
-- **Used**: `model` (empty uses `-claude-model`; passed to the CLI as is, so aliases and full ids work), `messages` (required), `stream` (must be `false`/absent).
+- **Used**: `model` (empty uses `-claude-model`; passed to the CLI as is, so aliases and full ids work), `messages` (required), `stream` (SSE when `true`), `stream_options.include_usage` (only with `stream: true`).
 - **Messages**: roles `system` and `developer` are merged (in order, blank-line separated) into the system prompt; `user` and `assistant` form the conversation, which must end with a non-empty `user` message. `content` is a string or an array of `{"type":"text","text":...}` parts (joined with newlines).
-- **Ignored without error** (not echoed): `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, `presence_penalty`, `frequency_penalty`, `seed`, `user`, `stream_options`, `response_format`, `logit_bias`, `metadata`, and any unknown field.
-- **Rejected with 400**: `tools`/`functions`, `tool_calls`/`function_call` and `tool`/`function` roles (`unsupported_parameter`; tool calling is not supported), `n` > 1 (`unsupported_parameter`), `stream: true` (`streaming_not_supported`), content parts other than text (`unsupported_content_type`).
+- **Ignored without error** (not echoed): `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, `presence_penalty`, `frequency_penalty`, `seed`, `user`, `response_format`, `logit_bias`, `metadata`, and any unknown field.
+- **Rejected with 400**: `tools`/`functions`, `tool_calls`/`function_call` and `tool`/`function` roles (`unsupported_parameter`; tool calling is not supported), `n` > 1 (`unsupported_parameter`), content parts other than text (`unsupported_content_type`).
 - Body limit 8 MiB (`413 request_too_large`).
+
+- Trailing data after the JSON body is rejected (`invalid_json`); whitespace is fine.
 
 Response: `chat.completion` with one choice. `finish_reason` is `length` when Claude stopped on `max_tokens`, otherwise `stop`. `usage.prompt_tokens` = input + cache creation + cache read tokens.
 
@@ -105,7 +107,7 @@ All errors use the OpenAI body `{"error":{"message","type","param":null,"code"}}
 
 | Status | `code` | Cause |
 |---|---|---|
-| 400 | `invalid_json`, `invalid_request_body`, `invalid_messages`, `invalid_request`, `unsupported_parameter`, `unsupported_content_type`, `streaming_not_supported` | Bad request (see above) |
+| 400 | `invalid_json`, `invalid_request_body`, `invalid_messages`, `invalid_request`, `unsupported_parameter`, `unsupported_content_type` | Bad request (see above) |
 | 401 | `missing_api_key`, `invalid_api_key` | Auth enabled and key missing/wrong |
 | 404 | `model_not_found` | Model unknown to the CLI |
 | 413 | `request_too_large` | Body over 8 MiB |
@@ -116,6 +118,40 @@ All errors use the OpenAI body `{"error":{"message","type","param":null,"code"}}
 | 504 | `upstream_timeout` | Exceeded `-claude-timeout` |
 
 If the client disconnects mid-request no body is written (logged at debug, recorded as 499).
+
+### Streaming (SSE)
+
+With `"stream": true` the response is `text/event-stream` (`Cache-Control: no-cache`, `X-Accel-Buffering: no`). Each event is `data: <json>\n\n`, flushed immediately, and the stream ends with `data: [DONE]`:
+
+1. a `chat.completion.chunk` with `delta: {"role":"assistant","content":""}`;
+2. one chunk per text delta, `delta: {"content":"..."}`, `finish_reason: null`;
+3. a chunk with `delta: {}` and `finish_reason` `stop` (or `length` when Claude stopped on `max_tokens`);
+4. only when `stream_options.include_usage` is `true`: a chunk with `"choices":[]` and `usage` (`prompt_tokens` = input + cache creation + cache read, `completion_tokens`, `total_tokens`). Without it no `usage` is sent.
+
+All chunks share `id`, `created` and `model`. The model is the requested one (or `-claude-model`): the first chunk goes out before the CLI reports which model it resolved.
+
+**Errors.** The response is committed on the first delta. A failure before that (auth, unknown model, rate limit, busy, timeout, a failed run with no output) is the normal JSON error with the same status as the non-streaming call. A failure after that is delivered as one event `data: {"error":{"message","type","param":null,"code"}}` (same sanitized body) followed by `data: [DONE]`; the HTTP status stays 200. If the client disconnects the CLI process is killed and nothing more is written.
+
+**Proxies.** There is no heartbeat, so a reverse proxy that buffers or has a short idle timeout can break long silent gaps: disable buffering (`X-Accel-Buffering: no` is sent for nginx) and raise `proxy_read_timeout`. The server clears its write deadline for the stream.
+
+```bash
+curl -N http://127.0.0.1:46564/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"haiku","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"Count from 1 to 5"}]}'
+```
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:46564/v1", api_key="unused-unless-keys-are-set")
+stream = client.chat.completions.create(
+    model="haiku",
+    messages=[{"role": "user", "content": "Count from 1 to 5"}],
+    stream=True,
+)
+for chunk in stream:
+    if chunk.choices and chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="", flush=True)
+```
 
 ```bash
 # auth disabled

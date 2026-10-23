@@ -78,12 +78,13 @@
         },
         "/v1/chat/completions": {
             "post": {
-                "description": "OpenAI-compatible, non-streaming chat completion backed by the Claude Code CLI.\nUsed fields: model (empty uses the server default), messages (string or text-part content; roles system, developer, user, assistant), stream (must be false or absent).\nIgnored without error: temperature, top_p, max_tokens, max_completion_tokens, stop, presence_penalty, frequency_penalty, seed, user, stream_options, response_format, logit_bias, metadata.\nRejected with 400: tools/functions/tool_calls/function_call and tool or function roles (unsupported_parameter), n \u003e 1 (unsupported_parameter), stream true (streaming_not_supported), non-text content parts (unsupported_content_type).",
+                "description": "OpenAI-compatible chat completion backed by the Claude Code CLI. With stream true the response is a text/event-stream of chat.completion.chunk events ending with data: [DONE].\nUsed fields: model (empty uses the server default), messages (string or text-part content; roles system, developer, user, assistant), stream (SSE when true), stream_options.include_usage (final usage chunk).\nIgnored without error: temperature, top_p, max_tokens, max_completion_tokens, stop, presence_penalty, frequency_penalty, seed, user, response_format, logit_bias, metadata.\nRejected with 400: tools/functions/tool_calls/function_call and tool or function roles (unsupported_parameter), n \u003e 1 (unsupported_parameter), non-text content parts (unsupported_content_type).",
                 "consumes": [
                     "application/json"
                 ],
                 "produces": [
-                    "application/json"
+                    "application/json",
+                    "text/event-stream"
                 ],
                 "tags": [
                     "OpenAI"

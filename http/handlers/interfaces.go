@@ -18,5 +18,8 @@ type Router interface {
 // ChatBackend is the Claude capability consumed by the chat completions
 // handler. It is satisfied by claude.Backend.
 type ChatBackend interface {
+	// Stream runs the request calling emit for every event; an error from emit
+	// aborts the run (the CLI process is killed) and is returned.
+	Stream(ctx context.Context, req claude.Request, emit func(claude.Event) error) (claude.Result, error)
 	Complete(ctx context.Context, req claude.Request) (claude.Result, error)
 }

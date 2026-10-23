@@ -7,9 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/martinezsaweczko/claudeai-api/http/middleware"
@@ -31,8 +34,8 @@ type ChatHandlerConfig struct {
 	BasePath     string // e.g. "/v1"
 }
 
-// ChatHandler serves the OpenAI-compatible chat completions endpoint
-// (non-streaming).
+// ChatHandler serves the OpenAI-compatible chat completions endpoint,
+// including Server-Sent Events streaming.
 type ChatHandler struct {
 	log          *slog.Logger
 	backend      ChatBackend
@@ -71,9 +74,20 @@ type chatRequest struct {
 	Model     string          `json:"model"`
 	Messages  []chatMessage   `json:"messages"`
 	Stream    bool            `json:"stream"`
+	StreamOpt *streamOptions  `json:"stream_options"`
 	N         *int            `json:"n"`
 	Tools     json.RawMessage `json:"tools"`
 	Functions json.RawMessage `json:"functions"`
+}
+
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
+}
+
+// chatOptions are the request settings the handler itself acts on.
+type chatOptions struct {
+	stream       bool
+	includeUsage bool
 }
 
 type chatMessage struct {
@@ -145,10 +159,12 @@ type apiError struct {
 	errType string
 	code    string
 	message string
+
+	retryAfter string // Retry-After header value, when set
 }
 
 func badRequest(code, message string) *apiError {
-	return &apiError{http.StatusBadRequest, middleware.ErrorTypeInvalidRequest, code, message}
+	return &apiError{status: http.StatusBadRequest, errType: middleware.ErrorTypeInvalidRequest, code: code, message: message}
 }
 
 const toolsUnsupported = "Tool and function calling is not supported by this service."
@@ -156,13 +172,13 @@ const toolsUnsupported = "Tool and function calling is not supported by this ser
 // Create a chat completion
 //
 //	@Summary      Create a chat completion
-//	@Description  OpenAI-compatible, non-streaming chat completion backed by the Claude Code CLI.
-//	@Description  Used fields: model (empty uses the server default), messages (string or text-part content; roles system, developer, user, assistant), stream (must be false or absent).
-//	@Description  Ignored without error: temperature, top_p, max_tokens, max_completion_tokens, stop, presence_penalty, frequency_penalty, seed, user, stream_options, response_format, logit_bias, metadata.
-//	@Description  Rejected with 400: tools/functions/tool_calls/function_call and tool or function roles (unsupported_parameter), n > 1 (unsupported_parameter), stream true (streaming_not_supported), non-text content parts (unsupported_content_type).
+//	@Description  OpenAI-compatible chat completion backed by the Claude Code CLI. With stream true the response is a text/event-stream of chat.completion.chunk events ending with data: [DONE].
+//	@Description  Used fields: model (empty uses the server default), messages (string or text-part content; roles system, developer, user, assistant), stream (SSE when true), stream_options.include_usage (final usage chunk).
+//	@Description  Ignored without error: temperature, top_p, max_tokens, max_completion_tokens, stop, presence_penalty, frequency_penalty, seed, user, response_format, logit_bias, metadata.
+//	@Description  Rejected with 400: tools/functions/tool_calls/function_call and tool or function roles (unsupported_parameter), n > 1 (unsupported_parameter), non-text content parts (unsupported_content_type).
 //	@Tags         OpenAI
 //	@Accept       json
-//	@Produce      json
+//	@Produce      json,text/event-stream
 //	@Security     BearerAuth
 //	@Param        request  body      chatRequestDoc  true  "Chat completion request"
 //	@Success      200      {object}  chatCompletion
@@ -178,10 +194,14 @@ const toolsUnsupported = "Tool and function calling is not supported by this ser
 func (h *ChatHandler) createCompletion(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	creq, apiErr := h.parseRequest(w, r)
+	creq, opts, apiErr := h.parseRequest(w, r)
 	if apiErr != nil {
 		h.log.DebugContext(ctx, "Rejected chat completion request", "code", apiErr.code)
 		writeAPIError(w, apiErr)
+		return
+	}
+	if opts.stream {
+		h.streamCompletion(w, r, creq, opts)
 		return
 	}
 
@@ -230,7 +250,16 @@ func (h *ChatHandler) fail(ctx context.Context, w http.ResponseWriter, err error
 		w.WriteHeader(statusClientClosedRequest)
 		return
 	}
+	e := h.mapBackendError(ctx, err)
+	if e.retryAfter != "" {
+		w.Header().Set("Retry-After", e.retryAfter)
+	}
+	writeAPIError(w, e)
+}
 
+// mapBackendError turns a backend error into the client-facing error and logs
+// the failure. It is shared by the JSON and the SSE error paths.
+func (h *ChatHandler) mapBackendError(ctx context.Context, err error) *apiError {
 	var e *apiError
 	level := slog.LevelError
 	switch {
@@ -238,60 +267,73 @@ func (h *ChatHandler) fail(ctx context.Context, w http.ResponseWriter, err error
 		e = badRequest("invalid_request", "The messages are not valid: the last message must be a non-empty user message.")
 		level = slog.LevelInfo
 	case errors.Is(err, claude.ErrInvalidModel):
-		e = &apiError{http.StatusNotFound, middleware.ErrorTypeInvalidRequest, "model_not_found", "The requested model does not exist."}
+		e = &apiError{status: http.StatusNotFound, errType: middleware.ErrorTypeInvalidRequest, code: "model_not_found", message: "The requested model does not exist."}
 		level = slog.LevelInfo
 	case errors.Is(err, claude.ErrAuth):
-		e = &apiError{http.StatusBadGateway, middleware.ErrorTypeAPI, "upstream_auth_error", "The service could not authenticate with Claude. The operator must renew the Claude login."}
+		e = &apiError{status: http.StatusBadGateway, errType: middleware.ErrorTypeAPI, code: "upstream_auth_error", message: "The service could not authenticate with Claude. The operator must renew the Claude login."}
 	case errors.Is(err, claude.ErrRateLimited):
-		e = &apiError{http.StatusTooManyRequests, middleware.ErrorTypeRateLimit, "rate_limit_exceeded", "The Claude usage limit was reached. Try again later."}
+		e = &apiError{status: http.StatusTooManyRequests, errType: middleware.ErrorTypeRateLimit, code: "rate_limit_exceeded", message: "The Claude usage limit was reached. Try again later."}
 		level = slog.LevelWarn
 	case errors.Is(err, claude.ErrBusy):
-		w.Header().Set("Retry-After", "1")
-		e = &apiError{http.StatusTooManyRequests, middleware.ErrorTypeRateLimit, "server_busy", "The server is busy. Retry shortly."}
+		e = &apiError{status: http.StatusTooManyRequests, errType: middleware.ErrorTypeRateLimit, code: "server_busy", message: "The server is busy. Retry shortly.", retryAfter: "1"}
 		level = slog.LevelWarn
 	case errors.Is(err, claude.ErrTimeout):
-		e = &apiError{http.StatusGatewayTimeout, middleware.ErrorTypeAPI, "upstream_timeout", "Claude did not answer in time."}
+		e = &apiError{status: http.StatusGatewayTimeout, errType: middleware.ErrorTypeAPI, code: "upstream_timeout", message: "Claude did not answer in time."}
 		level = slog.LevelWarn
 	case errors.Is(err, claude.ErrCLI), errors.Is(err, claude.ErrNotFound):
-		e = &apiError{http.StatusBadGateway, middleware.ErrorTypeAPI, "upstream_error", "The upstream Claude service failed."}
+		e = &apiError{status: http.StatusBadGateway, errType: middleware.ErrorTypeAPI, code: "upstream_error", message: "The upstream Claude service failed."}
 	default:
-		e = &apiError{http.StatusInternalServerError, middleware.ErrorTypeAPI, "upstream_error", "The upstream Claude service failed."}
+		e = &apiError{status: http.StatusInternalServerError, errType: middleware.ErrorTypeAPI, code: "upstream_error", message: "The upstream Claude service failed."}
 	}
 	h.log.Log(ctx, level, "Chat completion failed", "status", e.status, "code", e.code, "error", err)
-	writeAPIError(w, e)
+	return e
 }
 
 func writeAPIError(w http.ResponseWriter, e *apiError) {
 	middleware.WriteOpenAIError(w, e.status, e.message, e.errType, e.code)
 }
 
-// parseRequest decodes and validates the body and builds the backend request.
-func (h *ChatHandler) parseRequest(w http.ResponseWriter, r *http.Request) (claude.Request, *apiError) {
-	var req chatRequest
+// decodeBody reads exactly one JSON value from the (size-limited) body.
+func decodeBody(w http.ResponseWriter, r *http.Request, req *chatRequest) *apiError {
 	body := http.MaxBytesReader(w, r.Body, maxChatBodyBytes)
-	if err := json.NewDecoder(body).Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		var typeErr *json.UnmarshalTypeError
-		switch {
-		case errors.As(err, &tooLarge):
-			return claude.Request{}, &apiError{http.StatusRequestEntityTooLarge, middleware.ErrorTypeInvalidRequest, "request_too_large", "The request body is too large (limit 8 MiB)."}
-		case errors.As(err, &typeErr):
-			return claude.Request{}, badRequest("invalid_request_body", "A request field has the wrong type: "+typeErr.Field)
+	dec := json.NewDecoder(body)
+	err := dec.Decode(req)
+	if err == nil {
+		// Anything but whitespace after the first value is malformed input.
+		var extra json.RawMessage
+		if err = dec.Decode(&extra); errors.Is(err, io.EOF) {
+			return nil
+		} else if err == nil {
+			return badRequest("invalid_json", "The request body must contain a single JSON object.")
 		}
-		return claude.Request{}, badRequest("invalid_json", "The request body is not valid JSON.")
 	}
+	var tooLarge *http.MaxBytesError
+	var typeErr *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &tooLarge):
+		return &apiError{status: http.StatusRequestEntityTooLarge, errType: middleware.ErrorTypeInvalidRequest, code: "request_too_large", message: "The request body is too large (limit 8 MiB)."}
+	case errors.As(err, &typeErr):
+		return badRequest("invalid_request_body", "A request field has the wrong type: "+typeErr.Field)
+	}
+	return badRequest("invalid_json", "The request body is not valid JSON.")
+}
 
-	if req.Stream {
-		return claude.Request{}, badRequest("streaming_not_supported", "Streaming is not available yet: send \"stream\": false.")
+// parseRequest decodes and validates the body and builds the backend request.
+func (h *ChatHandler) parseRequest(w http.ResponseWriter, r *http.Request) (claude.Request, chatOptions, *apiError) {
+	var req chatRequest
+	if apiErr := decodeBody(w, r, &req); apiErr != nil {
+		return claude.Request{}, chatOptions{}, apiErr
 	}
+	opts := chatOptions{stream: req.Stream, includeUsage: req.StreamOpt != nil && req.StreamOpt.IncludeUsage}
+
 	if req.N != nil && *req.N > 1 {
-		return claude.Request{}, badRequest("unsupported_parameter", "Only n = 1 is supported.")
+		return claude.Request{}, chatOptions{}, badRequest("unsupported_parameter", "Only n = 1 is supported.")
 	}
 	if present(req.Tools) || present(req.Functions) {
-		return claude.Request{}, badRequest("unsupported_parameter", toolsUnsupported)
+		return claude.Request{}, chatOptions{}, badRequest("unsupported_parameter", toolsUnsupported)
 	}
 	if len(req.Messages) == 0 {
-		return claude.Request{}, badRequest("invalid_messages", "'messages' is required and must not be empty.")
+		return claude.Request{}, chatOptions{}, badRequest("invalid_messages", "'messages' is required and must not be empty.")
 	}
 
 	out := claude.Request{Model: strings.TrimSpace(req.Model)}
@@ -301,18 +343,18 @@ func (h *ChatHandler) parseRequest(w http.ResponseWriter, r *http.Request) (clau
 	var system []string
 	for _, m := range req.Messages {
 		if present(m.ToolCalls) || present(m.FunctionCall) {
-			return claude.Request{}, badRequest("unsupported_parameter", toolsUnsupported)
+			return claude.Request{}, chatOptions{}, badRequest("unsupported_parameter", toolsUnsupported)
 		}
 		switch m.Role {
 		case "tool", "function":
-			return claude.Request{}, badRequest("unsupported_parameter", toolsUnsupported)
+			return claude.Request{}, chatOptions{}, badRequest("unsupported_parameter", toolsUnsupported)
 		case "system", "developer", claude.RoleUser, claude.RoleAssistant:
 		default:
-			return claude.Request{}, badRequest("invalid_messages", "Unsupported message role; use system, developer, user or assistant.")
+			return claude.Request{}, chatOptions{}, badRequest("invalid_messages", "Unsupported message role; use system, developer, user or assistant.")
 		}
 		text, apiErr := contentText(m.Content)
 		if apiErr != nil {
-			return claude.Request{}, apiErr
+			return claude.Request{}, chatOptions{}, apiErr
 		}
 		if m.Role == "system" || m.Role == "developer" {
 			if strings.TrimSpace(text) != "" {
@@ -323,7 +365,7 @@ func (h *ChatHandler) parseRequest(w http.ResponseWriter, r *http.Request) (clau
 		out.Messages = append(out.Messages, claude.Message{Role: m.Role, Content: text})
 	}
 	out.System = strings.Join(system, "\n\n")
-	return out, nil
+	return out, opts, nil
 }
 
 // present reports whether an optional JSON field carries a non-empty value.
@@ -363,8 +405,17 @@ func contentText(raw json.RawMessage) (string, *apiError) {
 	return "", badRequest("invalid_messages", "Message content must be a string or an array of text parts.")
 }
 
-func newCompletionID() string {
+var fallbackIDCounter atomic.Uint64
+
+func newCompletionID() string { return completionIDFrom(rand.Reader) }
+
+// completionIDFrom builds a completion id from random bytes. If the entropy
+// source fails it falls back to a time- and counter-based suffix, which stays
+// unique within the process and is good enough for a non-secret identifier.
+func completionIDFrom(r io.Reader) string {
 	var b [12]byte
-	_, _ = rand.Read(b[:])
+	if _, err := io.ReadFull(r, b[:]); err != nil {
+		return fmt.Sprintf("chatcmpl-%016x%08x", time.Now().UnixNano(), uint32(fallbackIDCounter.Add(1)))
+	}
 	return "chatcmpl-" + hex.EncodeToString(b[:])
 }

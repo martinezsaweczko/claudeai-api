@@ -49,13 +49,21 @@ func (b *stubBackend) Complete(context.Context, claude.Request) (claude.Result, 
 
 func wiredServers(t *testing.T, keys []string) (public, internal *muxServer, be *stubBackend) {
 	t.Helper()
+	be = &stubBackend{}
+	public, internal = wiredServersWith(t, keys, be)
+	return public, internal, be
+}
+
+// wiredServersWith wires the app around the given Claude backend.
+func wiredServersWith(t *testing.T, keys []string, backend claude.Backend) (public, internal *muxServer) {
+	t.Helper()
 	tp := sdktrace.NewTracerProvider()
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 	cfg := &config.Config{Claude: config.ClaudeConfig{
 		Bin: "claude", Model: "sonnet", Models: []string{"sonnet", "opus"},
 		Timeout: time.Minute, MaxConcurrency: 1, APIKeys: keys,
 	}}
-	public, internal, be = newMuxServer(), newMuxServer(), &stubBackend{}
+	public, internal = newMuxServer(), newMuxServer()
 	a := NewApp(cfg).
 		WithPublicServer(public).
 		WithInternalServer(internal).
@@ -64,11 +72,11 @@ func wiredServers(t *testing.T, keys []string) (public, internal *muxServer, be 
 		WithBuildInfo(model.BuildInfo{Version: "test"}).
 		WithBasePath("/api/v1")
 	a.lookupEnv = func(string) (string, bool) { return "", false }
-	a.claude = be
+	a.claude = backend
 	if err := a.initAndWire(); err != nil {
 		t.Fatalf("initAndWire: %v", err)
 	}
-	return public, internal, be
+	return public, internal
 }
 
 func do(s *muxServer, method, path, auth, body string) *httptest.ResponseRecorder {

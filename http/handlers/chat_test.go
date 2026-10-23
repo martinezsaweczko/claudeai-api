@@ -25,6 +25,19 @@ type fakeChatBackend struct {
 	calls int
 	req   claude.Request
 	ctx   context.Context
+
+	// stream, when set, implements Stream.
+	stream func(ctx context.Context, req claude.Request, emit func(claude.Event) error) (claude.Result, error)
+}
+
+func (f *fakeChatBackend) Stream(ctx context.Context, req claude.Request, emit func(claude.Event) error) (claude.Result, error) {
+	f.calls++
+	f.req = req
+	f.ctx = ctx
+	if f.stream != nil {
+		return f.stream(ctx, req, emit)
+	}
+	return f.res, f.err
 }
 
 func (f *fakeChatBackend) Complete(ctx context.Context, req claude.Request) (claude.Result, error) {
@@ -177,6 +190,12 @@ func TestChatCompletionRequestMapping(t *testing.T) {
 			wantMsgs:   []claude.Message{{Role: "user", Content: "q"}, {Role: "assistant", Content: "a"}, {Role: "user", Content: "q2"}},
 		},
 		{
+			name:      "trailing whitespace after the body is fine",
+			body:      "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}\n \t\r\n",
+			wantModel: "sonnet",
+			wantMsgs:  []claude.Message{{Role: "user", Content: "hi"}},
+		},
+		{
 			name:      "ignored fields and unknown fields are accepted",
 			body:      `{"messages":[{"role":"user","content":"hi"}],"temperature":0.2,"top_p":1,"max_tokens":5,"max_completion_tokens":5,"stop":["x"],"presence_penalty":0,"frequency_penalty":0,"seed":1,"user":"u","stream_options":{"include_usage":true},"response_format":{"type":"text"},"logit_bias":{},"metadata":{"a":"b"},"stream":false,"n":1,"tools":[],"whatever":1}`,
 			wantModel: "sonnet",
@@ -223,7 +242,9 @@ func TestChatCompletionRejectsBadRequests(t *testing.T) {
 		{"tools", `{"messages":[{"role":"user","content":"x"}],"tools":[{"type":"function"}]}`, 400, "invalid_request_error", "unsupported_parameter"},
 		{"functions", `{"messages":[{"role":"user","content":"x"}],"functions":[{"name":"f"}]}`, 400, "invalid_request_error", "unsupported_parameter"},
 		{"n greater than one", `{"messages":[{"role":"user","content":"x"}],"n":2}`, 400, "invalid_request_error", "unsupported_parameter"},
-		{"stream", `{"messages":[{"role":"user","content":"x"}],"stream":true}`, 400, "invalid_request_error", "streaming_not_supported"},
+		{"trailing data", `{"messages":[{"role":"user","content":"x"}]} {"a":1}`, 400, "invalid_request_error", "invalid_json"},
+		{"trailing garbage", `{"messages":[{"role":"user","content":"x"}]}xyz`, 400, "invalid_request_error", "invalid_json"},
+		{"stream_options wrong type", `{"messages":[{"role":"user","content":"x"}],"stream_options":{"include_usage":"yes"}}`, 400, "invalid_request_error", "invalid_request_body"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -322,6 +343,10 @@ func TestChatCompletionClientCancelWritesNoBody(t *testing.T) {
 }
 
 type cancelBackend struct{ cancel context.CancelFunc }
+
+func (c *cancelBackend) Stream(ctx context.Context, req claude.Request, _ func(claude.Event) error) (claude.Result, error) {
+	return c.Complete(ctx, req)
+}
 
 func (c *cancelBackend) Complete(ctx context.Context, _ claude.Request) (claude.Result, error) {
 	c.cancel()
