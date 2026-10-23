@@ -50,7 +50,7 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 # Stage 2: build the gateway (pure Go, no CGO)
 # ---------------------------------------------------------------------------
-FROM golang:1.27.2-bookworm AS builder
+FROM golang:1.27.3-bookworm AS builder
 
 WORKDIR /app
 
