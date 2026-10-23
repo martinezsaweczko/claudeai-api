@@ -27,6 +27,7 @@ Before committing, ALL of: `go build ./...`, `go vet ./...`, `gofmt -l .` empty,
 - **Auth**: `middleware.APIKeyAuth(keys)` is optional Bearer API-key auth. No keys configured means auth is OFF (pass-through); it guards only the public `/v1` routes, never health/version/metrics/swagger. Errors use the OpenAI shape via `middleware.WriteOpenAIError` (middleware must not import `http/handlers`).
 - **Streaming**: any `http.ResponseWriter` wrapper must implement `Flush()` and `Unwrap()` (see `http/middleware/logging.go`). The public server write timeout defaults to 0 so long SSE responses are not cut; do not reintroduce a fixed write timeout there.
 - **Server start**: `HTTPServer.Start` binds synchronously and returns bind errors; serve errors after binding are logged.
+- **Claude backend**: `services/claude` defines `Backend` (`Stream`/`Complete`) and `CLIBackend`, which spawns one isolated `claude -p` per request (prompt on stdin, own process group killed on timeout, `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` stripped, isolation flags in `buildArgs`). Spike findings and event shapes are in the package doc. Tests use a re-exec fake CLI; the real-CLI test needs `CLAUDEAI_INTEGRATION=1`. `initAndWire` keeps it on `app.claude`.
 
 ## Observability (mandatory for new code)
 

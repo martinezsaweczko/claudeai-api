@@ -14,6 +14,7 @@ import (
 	"github.com/martinezsaweczko/claudeai-api/http/middleware"
 	"github.com/martinezsaweczko/claudeai-api/model"
 	"github.com/martinezsaweczko/claudeai-api/o11"
+	"github.com/martinezsaweczko/claudeai-api/services/claude"
 )
 
 // Server defines the interface for any HTTP server implementation
@@ -41,6 +42,9 @@ type App struct {
 	// apiKeyAuth guards the /v1 routes (attached when they are added). It is a
 	// pass-through when no API keys are configured.
 	apiKeyAuth middleware.Middleware
+
+	// claude runs chat requests (consumed by the /v1 handlers added later).
+	claude claude.Backend
 }
 
 func NewApp(cfg *config.Config) *App {

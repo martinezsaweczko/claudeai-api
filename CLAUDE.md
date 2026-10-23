@@ -41,3 +41,5 @@ The first middleware listed in `middleware.Chain` is the outermost: tracing -> m
 ### Claude configuration and secrets
 
 Flags: `-claude-bin` (`claude`), `-claude-model` (`sonnet`), `-claude-timeout` (`5m`), `-claude-max-concurrency` (`4`, >= 1). Secrets use environment variables, not flags: `CLAUDE_CODE_OAUTH_TOKEN` (optional) and `CLAUDEAI_API_KEYS` (optional, comma-separated; unset means no client auth). `initAndWire` builds `app.apiKeyAuth` and logs `api_key_auth=enabled|disabled` plus warnings (unauthenticated on a non-loopback `-http-address`; `ANTHROPIC_API_KEY` set in the environment). The `/v1` routes (added later) attach `app.apiKeyAuth`.
+
+Backend: `services/claude.CLIBackend` (built in `initAndWire` as `app.claude`) runs `claude -p --output-format stream-json` per request with config isolation flags (`--setting-sources ""`, `--strict-mcp-config`, `--disable-slash-commands`); see the package doc in `services/claude/doc.go` for the verified event shapes and flags.

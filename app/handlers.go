@@ -5,6 +5,7 @@ import (
 
 	"github.com/martinezsaweczko/claudeai-api/http/handlers"
 	"github.com/martinezsaweczko/claudeai-api/http/middleware"
+	"github.com/martinezsaweczko/claudeai-api/services/claude"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -49,6 +50,12 @@ func (app *App) initAndWire() error {
 	// ----- Claude backend security posture -----
 	app.apiKeyAuth = middleware.APIKeyAuth(cfg.Claude.APIKeys)
 	logClaudeStartup(log, cfg, app.lookupEnv)
+
+	claudeOpts := []claude.Option{claude.WithLogger(log)}
+	if app.observability != nil && app.observability.Trace != nil {
+		claudeOpts = append(claudeOpts, claude.WithTracerProvider(app.observability.Trace))
+	}
+	app.claude = claude.NewCLIBackend(cfg.Claude, claudeOpts...)
 
 	// ----- Routes -----
 	loggingMiddleware := middleware.LoggingMiddleware(log)
