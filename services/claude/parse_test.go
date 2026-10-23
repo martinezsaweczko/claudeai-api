@@ -288,3 +288,85 @@ func TestParserSeparatesTurnsOnlyAfterEarlierText(t *testing.T) {
 		t.Fatalf("Text = %q, want accumulated %q (not the last turn only)", res.Text, wantText)
 	}
 }
+
+func TestParserWebSearchFixture(t *testing.T) {
+	p, events := feedFixture(t, "web_search.stream.jsonl")
+	joined := strings.Join(deltasOf(events), "")
+	if !strings.HasPrefix(joined, "El último partido") {
+		t.Fatalf("text = %q", joined)
+	}
+	for _, leak := range []string{"tool_use", "toolu_", "partial_json", "WebSearch", "Web search results", "Links:", "\"query\"", "server_tool_use"} {
+		if strings.Contains(joined, leak) {
+			t.Errorf("web tool content leaked into text (%q)", leak)
+		}
+	}
+	res, err := p.finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != joined {
+		t.Errorf("Result.Text != concatenated deltas")
+	}
+	// The real result line reports usage.server_tool_use as 0 although two
+	// searches ran; modelUsage.webSearchRequests (2) and the tool_use blocks are
+	// what the parser must rely on.
+	if res.WebSearchRequests != 2 || res.WebFetchRequests != 0 {
+		t.Errorf("web requests = search %d fetch %d, want 2/0", res.WebSearchRequests, res.WebFetchRequests)
+	}
+	if res.NumTurns != 3 || res.CostUSD <= 0 || len(res.SkillsInvoked) != 0 {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+func TestParserWebToolsAcrossTurnsNeverLeak(t *testing.T) {
+	lines := []string{
+		`{"type":"stream_event","event":{"type":"message_start"}}`,
+		string(textDeltaLine("Let me look it up.")),
+		`{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"tool_use","name":"WebSearch"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"query\":\"secret query\"}"}}}`,
+		`{"type":"assistant","message":{"model":"claude-haiku-5-5","content":[{"type":"tool_use","id":"toolu_1","name":"WebSearch","input":{"query":"secret query"}}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"Web search results SECRET"}]}}`,
+		`{"type":"stream_event","event":{"type":"message_start"}}`,
+		`{"type":"assistant","message":{"model":"claude-haiku-5-5","content":[{"type":"server_tool_use","name":"web_search","input":{"query":"x"}},{"type":"web_search_tool_result","content":[{"title":"SECRET"}]},{"type":"tool_use","id":"toolu_2","name":"WebFetch","input":{"url":"https://example.com","prompt":"p"}}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_2","content":"fetched SECRET"}]}}`,
+		`{"type":"stream_event","event":{"type":"message_start"}}`,
+		string(textDeltaLine("The score was 2-1.")),
+		`{"type":"result","subtype":"success","is_error":false,"result":"The score was 2-1.","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2,"server_tool_use":{"web_search_requests":1,"web_fetch_requests":0}},"num_turns":3}`,
+	}
+	p := newStreamParser()
+	var deltas []string
+	for _, l := range lines {
+		evs, err := p.feed([]byte(l))
+		if err != nil {
+			t.Fatal(err)
+		}
+		deltas = append(deltas, deltasOf(evs)...)
+	}
+	want := []string{"Let me look it up.", "\n\nThe score was 2-1."}
+	if !reflect.DeepEqual(deltas, want) {
+		t.Fatalf("deltas = %q, want %q", deltas, want)
+	}
+	res, err := p.finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != strings.Join(want, "") {
+		t.Errorf("Text = %q", res.Text)
+	}
+	// usage reports 1 search; one WebSearch tool_use block was seen: max wins.
+	if res.WebSearchRequests != 1 || res.WebFetchRequests != 1 {
+		t.Errorf("web requests = search %d fetch %d, want 1/1", res.WebSearchRequests, res.WebFetchRequests)
+	}
+}
+
+func TestParserWebCountsFromResultOnly(t *testing.T) {
+	p := newStreamParser()
+	_, err := p.feed([]byte(`{"type":"result","subtype":"success","is_error":false,"result":"ok","usage":{"server_tool_use":{"web_search_requests":3,"web_fetch_requests":2}},"modelUsage":{"a":{"webSearchRequests":2},"b":{"webSearchRequests":2}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, _ := p.finish()
+	if res.WebSearchRequests != 4 || res.WebFetchRequests != 2 {
+		t.Errorf("web requests = %d/%d, want 4 (sum of modelUsage beats usage 3) / 2", res.WebSearchRequests, res.WebFetchRequests)
+	}
+}

@@ -430,3 +430,91 @@ func TestStreamParserSkillToolUse(t *testing.T) {
 		t.Error("tool arguments must never be captured")
 	}
 }
+
+func TestWebRequestsReportedFromRealFixture(t *testing.T) {
+	sink := &infoSink{}
+	sr := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr))
+	b := newFakeBackend(t, config.ClaudeConfig{Web: config.WebSearch}, map[string]string{envScenario: "fixture", envFixture: fixturePath(t, "web_search.stream.jsonl")},
+		WithObserver(sink.observe), WithTracerProvider(tp))
+
+	var streamed strings.Builder
+	res, err := b.Stream(context.Background(), simpleReq, func(e Event) error {
+		if e.Type == EventTextDelta {
+			streamed.WriteString(e.Text)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	comp, err := b.Complete(context.Background(), simpleReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != comp.Text || res.Text != streamed.String() {
+		t.Fatalf("stream %q / complete %q / deltas %q must agree", res.Text, comp.Text, streamed.String())
+	}
+	if res.WebSearchRequests != 2 || res.WebFetchRequests != 0 {
+		t.Errorf("result web = %d/%d", res.WebSearchRequests, res.WebFetchRequests)
+	}
+	infos := sink.all()
+	if len(infos) != 2 || infos[0].WebSearches != 2 || infos[0].WebFetches != 0 || infos[0].SkillsActive {
+		t.Errorf("RunInfo web = %+v", infos)
+	}
+	attrs := map[string]attribute.Value{}
+	for _, a := range sr.Ended()[0].Attributes() {
+		attrs[string(a.Key)] = a.Value
+	}
+	if attrs["claude.web.search_requests"].AsInt64() != 2 || attrs["claude.web.fetch_requests"].AsInt64() != 0 {
+		t.Errorf("span web attributes = %v", attrs)
+	}
+}
+
+func TestWebModeArgsAndSystemPrompt(t *testing.T) {
+	tests := []struct {
+		web, wantTools, wantAllowed string
+		hint                        bool
+	}{
+		{"", "", "", false},
+		{config.WebNone, "", "", false},
+		{config.WebSearch, "WebSearch", "WebSearch", true},
+		{config.WebFull, "WebSearch,WebFetch", "WebSearch,WebFetch", true},
+	}
+	for _, tt := range tests {
+		t.Run("web="+tt.web, func(t *testing.T) {
+			b := newFakeBackend(t, config.ClaudeConfig{Web: tt.web}, map[string]string{envScenario: "echo"})
+			p := runEcho(t, b, Request{System: "be brief", Messages: simpleReq.Messages})
+			if tools, _ := argValue(p.Args, "--tools"); tools != tt.wantTools {
+				t.Errorf("--tools = %q, want %q", tools, tt.wantTools)
+			}
+			allowed, has := argValue(p.Args, "--allowedTools")
+			if allowed != tt.wantAllowed || has != (tt.wantAllowed != "") {
+				t.Errorf("--allowedTools = %q (present %v), want %q", allowed, has, tt.wantAllowed)
+			}
+			system, _ := argValue(p.Args, "--system-prompt")
+			want := "be brief"
+			if tt.hint {
+				want += "\n\n" + webHint
+			}
+			if system != want {
+				t.Errorf("system = %q, want %q", system, want)
+			}
+			if !hasArg(p.Args, "--strict-mcp-config") || !hasArg(p.Args, "--no-chrome") || !hasArg(p.Args, "--disable-slash-commands") {
+				t.Errorf("isolation flags missing: %q", p.Args)
+			}
+		})
+	}
+}
+
+func TestWebAndSkillsCompose(t *testing.T) {
+	snap := t.TempDir()
+	b := newFakeBackend(t, config.ClaudeConfig{Web: config.WebFull}, map[string]string{envScenario: "echo"}, WithSkills(func() (string, bool) { return snap, true }))
+	p := runEcho(t, b, Request{System: "be brief", Messages: simpleReq.Messages})
+	if tools, _ := argValue(p.Args, "--tools"); tools != "Skill,WebSearch,WebFetch" {
+		t.Errorf("--tools = %q", tools)
+	}
+	if system, _ := argValue(p.Args, "--system-prompt"); system != "be brief\n\n"+skillsHint+"\n\n"+webHint {
+		t.Errorf("system = %q", system)
+	}
+}

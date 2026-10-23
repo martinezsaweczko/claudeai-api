@@ -33,6 +33,11 @@ func TestClaudeConfigValidate(t *testing.T) {
 		{"zero timeout", func(c *ClaudeConfig) { c.Timeout = 0 }, "claude timeout must be positive"},
 		{"negative timeout", func(c *ClaudeConfig) { c.Timeout = -time.Second }, "claude timeout must be positive"},
 		{"zero concurrency", func(c *ClaudeConfig) { c.MaxConcurrency = 0 }, "claude max concurrency must be at least 1"},
+		{"web unset means none", func(c *ClaudeConfig) { c.Web = "" }, ""},
+		{"web none", func(c *ClaudeConfig) { c.Web = WebNone }, ""},
+		{"web search", func(c *ClaudeConfig) { c.Web = WebSearch }, ""},
+		{"web full", func(c *ClaudeConfig) { c.Web = WebFull }, ""},
+		{"web invalid", func(c *ClaudeConfig) { c.Web = "all" }, `claude web must be one of none, search, full (got "all")`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -166,6 +171,9 @@ func TestClaudeConfigNeverPrintsSecrets(t *testing.T) {
 				t.Errorf("%s leaked a secret: %s", name, out)
 			}
 		}
+	}
+	if !strings.Contains(claude.String(), "Web:") || !strings.Contains(buf.String(), "web=") {
+		t.Errorf("web mode missing from String/LogValue: %s | %s", claude.String(), buf.String())
 	}
 	if out := buf.String(); !strings.Contains(out, "sonnet") {
 		t.Errorf("non-secret fields should still be logged, got: %s", out)

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/martinezsaweczko/claudeai-api/config"
 )
 
 // maxSystemArgBytes is the largest system prompt passed via argv. Linux limits
@@ -17,6 +19,11 @@ const defaultSystemPrompt = "You are a helpful assistant."
 // decides on its own whether to call the Skill tool, and in practice skips it
 // on plain prompts, so the hint states the expectation explicitly.
 const skillsHint = "You have skills available through the Skill tool. Use a skill whenever its description matches the user's request."
+
+// webHint is appended to the system prompt when web tools are active. Giving
+// the model the capability is not enough: without an explicit expectation it
+// answers recent-events questions from memory.
+const webHint = "You can search the web for current information. Do so for recent events, news, scores, prices or anything after your knowledge cutoff, and cite your sources."
 
 const transcriptHeader = "Below is the conversation so far. Reply only with the assistant's next message, without any role label."
 
@@ -60,17 +67,29 @@ func renderPrompt(messages []Message) (string, error) {
 // source is loaded; the working directory is the skills snapshot, which holds
 // nothing but .claude/skills (no settings, hooks, agents or commands), and
 // --disable-slash-commands is dropped because it also disables skills.
-func buildArgs(model, system string, skills bool) []string {
-	tools, sources := "", ""
+//
+// web is a config.Web* mode. WebSearch and WebFetch are added to --tools and,
+// because a headless run has no approval surface and denies any tool that is
+// not pre-approved, to --allowedTools (verified: --tools alone is denied).
+func buildArgs(model, system string, skills bool, web string) []string {
+	sources := ""
+	var tools []string
 	if skills {
-		tools, sources = "Skill", "project"
+		tools, sources = append(tools, skillToolName), "project"
 	}
+	webTools := webToolNames(web)
+	tools = append(tools, webTools...)
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
-		"--tools", tools,
+		"--tools", strings.Join(tools, ","),
+	}
+	if len(webTools) > 0 {
+		args = append(args, "--allowedTools", strings.Join(webTools, ","))
+	}
+	args = append(args,
 		"--no-session-persistence",
 		"--model", model,
 		"--system-prompt", system,
@@ -78,11 +97,41 @@ func buildArgs(model, system string, skills bool) []string {
 		// servers or Chrome integration into chat requests.
 		"--setting-sources", sources,
 		"--strict-mcp-config",
-	}
+	)
 	if !skills {
 		args = append(args, "--disable-slash-commands")
 	}
 	return append(args, "--no-chrome", "--permission-prompts", "none")
+}
+
+// Web tool names understood by the CLI.
+const (
+	webSearchToolName = "WebSearch"
+	webFetchToolName  = "WebFetch"
+)
+
+// webToolNames returns the CLI web tools a config.Web* mode enables. Unknown
+// and empty modes enable nothing.
+func webToolNames(web string) []string {
+	switch web {
+	case config.WebSearch:
+		return []string{webSearchToolName}
+	case config.WebFull:
+		return []string{webSearchToolName, webFetchToolName}
+	}
+	return nil
+}
+
+// composeSystem appends the skills and web hints, in that order, to the system
+// prompt according to the active capabilities.
+func composeSystem(system string, skills bool, web string) string {
+	if skills {
+		system += "\n\n" + skillsHint
+	}
+	if len(webToolNames(web)) > 0 {
+		system += "\n\n" + webHint
+	}
+	return system
 }
 
 // filterEnv removes variables that override the subscription login and, when a

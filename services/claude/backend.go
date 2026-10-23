@@ -46,6 +46,11 @@ type Result struct {
 
 	// SkillsInvoked lists the skills the model used, in order (repeats kept).
 	SkillsInvoked []string
+
+	// WebSearchRequests and WebFetchRequests count the web tool uses of the run
+	// (0 when web tools are off).
+	WebSearchRequests int
+	WebFetchRequests  int
 }
 
 // EventType identifies a streaming Event.

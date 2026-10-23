@@ -107,6 +107,57 @@
 // with a blank line. Usage and cost come from the final result line and cover
 // all turns.
 //
+// # Web tools (T10 spike, claude 2.1.309, Max login, haiku, 2026-10-23)
+//
+// Config -claude-web (none|search|full; unset means none). Verified with two
+// real calls from a temp directory plus one end-to-end gateway call:
+//
+//   - Syntax: `--tools` is variadic and takes one comma-separated value,
+//     `--tools WebSearch,WebFetch` (init listed both tools); with skills it is
+//     `--tools Skill,WebSearch`. `--tools WebSearch` alone works with
+//     `--setting-sources ""` (init tools: [WebSearch]).
+//   - Permissions: `--tools` only makes a tool available. With
+//     `--permission-prompts none` the call was DENIED automatically
+//     (system/permission_denied, tool_result "no approval surface", result
+//     permission_denials[0].tool_name WebSearch) and the model apologised.
+//     Adding `--allowedTools WebSearch,WebFetch` made it run, so buildArgs
+//     always sets both. Skill needs no --allowedTools (verified earlier).
+//   - Stream shape: WebSearch is an ordinary client tool: an assistant
+//     tool_use block {name:"WebSearch", input:{query, mode}}, input_json_delta
+//     stream events, then a user tool_result line whose content is a text blob
+//     "Web search results for query ... Links: [...]". There are no
+//     server_tool_use / web_search_tool_result blocks in the CLI stream; the
+//     parser still ignores them defensively. The Spanish Barcelona question
+//     made 2 searches (num_turns 3) and the answer cited sources; the
+//     testdata/web_search.stream.jsonl fixture is that capture (ids, paths
+//     and signatures redacted, tool_result truncated).
+//   - Counting: usage.server_tool_use.web_search_requests stayed 0 although
+//     two searches ran; modelUsage.<model>.webSearchRequests was 2. The parser
+//     takes the largest of modelUsage, usage.server_tool_use and the tool_use
+//     blocks. WebFetch was not exercised against the real CLI (the model chose
+//     not to fetch), so web_fetch_requests handling is unproven live.
+//   - Cost: the same question cost USD 0.026 (haiku, 3 turns, 25 s,
+//     usage 5.1k cache-creation + 6.2k cache-read tokens, modelUsage input
+//     33.6k because the nested search calls are counted there) against about
+//     USD 0.004 for a plain prompt; through the gateway with skills and web it
+//     reported 31.2k prompt tokens, USD 0.039 and 28 s.
+//   - Failure: the only failure observed is the denial above (no error exit,
+//     is_error false). Unavailability of WebSearch for an account/model was
+//     not forced; per the docs it depends on provider and plan.
+//   - Where it runs (https://code.claude.com/docs/en/tools-reference, "WebSearch
+//     tool behavior" and "WebFetch tool behavior"): WebSearch queries
+//     Anthropic's web search backend and returns titles and URLs; WebFetch
+//     fetches the page from the machine running the CLI and summarizes it with
+//     a separate model call. The docs say WebFetch refuses localhost and
+//     hostnames without a dot; they state the private/link-local/metadata
+//     address denial only for the WebSocket tool, so WebFetch blocking of
+//     private IPs is UNVERIFIED and treated as absent. In manual modes WebFetch
+//     prompts per domain and a domain safety check sends the domain to
+//     Anthropic (https://code.claude.com/docs/en/security). Headless runs have
+//     no prompt surface, hence --allowedTools. That is why `full` is opt-in.
+//
+// When web tools are active the system prompt gets webHint after skillsHint.
+//
 // Close removes the private temp working directory; the app calls it at
 // shutdown.
 package claude

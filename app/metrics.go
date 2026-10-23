@@ -86,6 +86,12 @@ func claudeRunObserver(m *o11.ClaudeMetrics, models modelNormalizer, skillNames 
 		if i.CostUSD > 0 {
 			m.CostUSDTotal.Add(ctx, i.CostUSD, withModel)
 		}
+		if i.WebSearches > 0 {
+			m.WebRequestsTotal.Add(ctx, int64(i.WebSearches), metric.WithAttributes(attribute.String("type", "search")))
+		}
+		if i.WebFetches > 0 {
+			m.WebRequestsTotal.Add(ctx, int64(i.WebFetches), metric.WithAttributes(attribute.String("type", "fetch")))
+		}
 		if len(i.SkillsInvoked) > 0 {
 			known := skillNames()
 			for _, name := range i.SkillsInvoked {

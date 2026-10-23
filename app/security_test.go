@@ -47,6 +47,7 @@ func TestLogClaudeStartup(t *testing.T) {
 		env       map[string]string
 		want      []string
 		wantAbsnt []string
+		web       string
 	}{
 		{
 			name:    "auth disabled on a public address warns",
@@ -68,6 +69,25 @@ func TestLogClaudeStartup(t *testing.T) {
 			wantAbsnt: []string{"level=WARN", secretKey, secretToken},
 		},
 		{
+			name:      "web search is logged without a warning",
+			address:   "127.0.0.1",
+			web:       config.WebSearch,
+			want:      []string{"claude_web=search"},
+			wantAbsnt: []string{"level=WARN", "WebFetch"},
+		},
+		{
+			name:    "web full warns about WebFetch SSRF",
+			address: "127.0.0.1",
+			web:     config.WebFull,
+			want:    []string{"claude_web=full", "level=WARN", "WebFetch", "SSRF"},
+		},
+		{
+			name:      "web unset is logged as none",
+			address:   "127.0.0.1",
+			want:      []string{"claude_web=none"},
+			wantAbsnt: []string{"level=WARN"},
+		},
+		{
 			name:      "ANTHROPIC_API_KEY set warns about billing",
 			address:   "127.0.0.1",
 			env:       map[string]string{"ANTHROPIC_API_KEY": "sk-ant-SECRET"},
@@ -83,6 +103,7 @@ func TestLogClaudeStartup(t *testing.T) {
 			cfg.HttpServer.Address = tt.address
 			cfg.Claude.APIKeys = tt.keys
 			cfg.Claude.OAuthToken = tt.token
+			cfg.Claude.Web = tt.web
 			lookup := func(k string) (string, bool) { v, ok := tt.env[k]; return v, ok }
 
 			logClaudeStartup(log, cfg, lookup)

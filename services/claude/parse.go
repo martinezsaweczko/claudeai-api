@@ -21,6 +21,17 @@ type rawUsage struct {
 	OutputTokens        int `json:"output_tokens"`
 	CacheCreationTokens int `json:"cache_creation_input_tokens"`
 	CacheReadTokens     int `json:"cache_read_input_tokens"`
+	ServerToolUse       struct {
+		WebSearchRequests int `json:"web_search_requests"`
+		WebFetchRequests  int `json:"web_fetch_requests"`
+	} `json:"server_tool_use"`
+}
+
+// rawModelUsage is the per-model block of the result line. Real runs report
+// the searches here (webSearchRequests) while usage.server_tool_use stays 0.
+type rawModelUsage struct {
+	WebSearchRequests int `json:"webSearchRequests"`
+	WebFetchRequests  int `json:"webFetchRequests"`
 }
 
 // rawLine is the union of the fields we read from any stream-json line.
@@ -41,14 +52,15 @@ type rawLine struct {
 	} `json:"message"`
 
 	// result line
-	IsError        bool     `json:"is_error"`
-	Result         string   `json:"result"`
-	StopReason     string   `json:"stop_reason"`
-	APIErrorStatus int      `json:"api_error_status"`
-	Usage          rawUsage `json:"usage"`
-	TotalCostUSD   float64  `json:"total_cost_usd"`
-	DurationMS     int64    `json:"duration_ms"`
-	NumTurns       int      `json:"num_turns"`
+	IsError        bool                     `json:"is_error"`
+	Result         string                   `json:"result"`
+	StopReason     string                   `json:"stop_reason"`
+	APIErrorStatus int                      `json:"api_error_status"`
+	Usage          rawUsage                 `json:"usage"`
+	ModelUsage     map[string]rawModelUsage `json:"modelUsage"`
+	TotalCostUSD   float64                  `json:"total_cost_usd"`
+	DurationMS     int64                    `json:"duration_ms"`
+	NumTurns       int                      `json:"num_turns"`
 }
 
 // contentBlock is the subset of an assistant content block read to find Skill
@@ -84,6 +96,13 @@ type streamParser struct {
 	costUSD  float64
 	numTurns int
 	skills   []string // skill names the model invoked, in order
+
+	// Web tool_use blocks seen in assistant messages (the figures on the result
+	// line are preferred when larger; see onResult).
+	webSearchUses int
+	webFetchUses  int
+	webSearch     int
+	webFetch      int
 }
 
 func newStreamParser() *streamParser { return &streamParser{} }
@@ -143,8 +162,18 @@ func (p *streamParser) collectSkills(content json.RawMessage) {
 		return
 	}
 	for _, b := range blocks {
-		if b.Type == "tool_use" && b.Name == skillToolName && b.Input.Skill != "" {
-			p.skills = append(p.skills, b.Input.Skill)
+		if b.Type != "tool_use" {
+			continue
+		}
+		switch b.Name {
+		case skillToolName:
+			if b.Input.Skill != "" {
+				p.skills = append(p.skills, b.Input.Skill)
+			}
+		case webSearchToolName:
+			p.webSearchUses++
+		case webFetchToolName:
+			p.webFetchUses++
 		}
 	}
 }
@@ -161,6 +190,7 @@ func (p *streamParser) onResult(l *rawLine) []Event {
 	}
 	p.costUSD = l.TotalCostUSD
 	p.numTurns = l.NumTurns
+	p.webSearch, p.webFetch = p.webCounts(l)
 	if l.IsError {
 		p.errText = l.Result
 		return nil
@@ -182,6 +212,9 @@ func (p *streamParser) onResult(l *rawLine) []Event {
 		StopReason:    l.StopReason,
 		NumTurns:      l.NumTurns,
 		SkillsInvoked: append([]string(nil), p.skills...),
+
+		WebSearchRequests: p.webSearch,
+		WebFetchRequests:  p.webFetch,
 	}
 
 	var events []Event
@@ -191,6 +224,24 @@ func (p *streamParser) onResult(l *rawLine) []Event {
 	}
 	res := p.result
 	return append(events, Event{Type: EventResult, Result: &res})
+}
+
+// webCounts combines the three places web tool use shows up: the result's
+// usage.server_tool_use, the per-model modelUsage (the only one that is
+// populated for WebSearch in real runs) and the tool_use blocks seen in the
+// stream. The largest figure wins, so none of them can under-report. A denied
+// tool_use block (no approval surface) is also counted by the blocks; that
+// cannot happen when the tool is in --allowedTools, which the backend always
+// sets.
+func (p *streamParser) webCounts(l *rawLine) (search, fetch int) {
+	modelSearch, modelFetch := 0, 0
+	for _, mu := range l.ModelUsage {
+		modelSearch += mu.WebSearchRequests
+		modelFetch += mu.WebFetchRequests
+	}
+	search = max(l.Usage.ServerToolUse.WebSearchRequests, modelSearch, p.webSearchUses)
+	fetch = max(l.Usage.ServerToolUse.WebFetchRequests, modelFetch, p.webFetchUses)
+	return search, fetch
 }
 
 // hasResult reports whether a result line was seen.

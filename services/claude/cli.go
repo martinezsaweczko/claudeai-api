@@ -68,6 +68,8 @@ type RunInfo struct {
 	SkillsActive  bool     // the run used a skills snapshot
 	SkillsCommit  string   // short commit of that snapshot, when known
 	SkillsInvoked []string // skills the model used, in order
+	WebSearches   int      // WebSearch uses of the run
+	WebFetches    int      // WebFetch uses of the run
 	Err           error
 }
 
@@ -247,6 +249,9 @@ func (b *CLIBackend) Stream(ctx context.Context, req Request, emit func(Event) e
 				info.Usage, info.CostUSD, info.NumTurns = parser.usage, parser.costUSD, parser.numTurns
 			}
 			info.SkillsInvoked = slices.Clone(parser.skills)
+			if parser.gotResult {
+				info.WebSearches, info.WebFetches = parser.webSearch, parser.webFetch
+			}
 		}
 		if withSkills {
 			info.SkillsCommit = skillsCommit(skillsDir)
@@ -263,6 +268,8 @@ func (b *CLIBackend) Stream(ctx context.Context, req Request, emit func(Event) e
 			attribute.Float64("claude.cost_usd", info.CostUSD),
 			attribute.Int("claude.num_turns", info.NumTurns),
 			attribute.Bool("claude.skills.active", info.SkillsActive),
+			attribute.Int("claude.web.search_requests", info.WebSearches),
+			attribute.Int("claude.web.fetch_requests", info.WebFetches),
 		)
 		if info.ResolvedModel != "" {
 			span.SetAttributes(attribute.String("claude.model.resolved", info.ResolvedModel))
@@ -318,16 +325,16 @@ func (b *CLIBackend) Stream(ctx context.Context, req Request, emit func(Event) e
 		}
 	}
 	dir := skillsDir
-	if withSkills {
-		system += "\n\n" + skillsHint
-	} else {
+	web := b.cfg.WebMode()
+	system = composeSystem(system, withSkills, web)
+	if !withSkills {
 		var derr error
 		if dir, derr = b.cwd(); derr != nil {
 			return Result{}, fmt.Errorf("%w: preparing working directory: %v", ErrCLI, derr)
 		}
 	}
 
-	args := append(append([]string{}, b.binArgs...), buildArgs(model, system, withSkills)...)
+	args := append(append([]string{}, b.binArgs...), buildArgs(model, system, withSkills, web)...)
 	cmd := exec.CommandContext(runCtx, b.cfg.Bin, args...)
 	cmd.Dir = dir
 	cmd.Env = filterEnv(b.environ(), b.cfg.OAuthToken)

@@ -98,14 +98,15 @@ func TestClaudeMetricsInstruments(t *testing.T) {
 	m.TokensTotal.Add(ctx, 868, metric.WithAttributes(sonnet, attribute.String("type", "cache_creation")))
 	m.CostUSDTotal.Add(ctx, 0.0036, metric.WithAttributes(sonnet))
 	m.SkillInvocationsTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("skill", "summarize")))
+	m.WebRequestsTotal.Add(ctx, 2, metric.WithAttributes(attribute.String("type", "search")))
 
 	got := collectedMetrics(t, reader)[MeterClaude]
-	if len(got) != 8 {
+	if len(got) != 9 {
 		names := make([]string, 0, len(got))
 		for n := range got {
 			names = append(names, n)
 		}
-		t.Fatalf("meter %q has %d instruments %v, want 8", MeterClaude, len(got), names)
+		t.Fatalf("meter %q has %d instruments %v, want 9", MeterClaude, len(got), names)
 	}
 	for name, m := range got {
 		if m.Description == "" {
@@ -146,6 +147,9 @@ func TestClaudeMetricsInstruments(t *testing.T) {
 	}
 	if v := sumPoints[int64](t, got["claude_skill_invocations_total"])[attrSet(attribute.String("skill", "summarize"))]; v != 1 {
 		t.Errorf("claude_skill_invocations_total = %d", v)
+	}
+	if v := sumPoints[int64](t, got["claude_web_requests_total"])[attrSet(attribute.String("type", "search"))]; v != 2 {
+		t.Errorf("claude_web_requests_total = %d", v)
 	}
 	if v := gaugePoints(t, got["claude_runs_in_flight"])[attrSet()]; v != 3 {
 		t.Errorf("claude_runs_in_flight = %d, want 3", v)
@@ -295,6 +299,7 @@ func TestPrometheusExpositionNames(t *testing.T) {
 	cm.TokensTotal.Add(ctx, 10, metric.WithAttributes(model, attribute.String("type", "output")))
 	cm.CostUSDTotal.Add(ctx, 0.001, metric.WithAttributes(model))
 	cm.SkillInvocationsTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("skill", "summarize")))
+	cm.WebRequestsTotal.Add(ctx, 2, metric.WithAttributes(attribute.String("type", "search")))
 	sm.SyncTotal.Add(ctx, 1, metric.WithAttributes(attribute.String("outcome", "success")))
 	sm.SyncDuration.Record(ctx, 0.4)
 
@@ -310,6 +315,7 @@ func TestPrometheusExpositionNames(t *testing.T) {
 		"claude_skill_invocations_total counter",
 		"claude_time_to_first_token_seconds histogram",
 		"claude_tokens_total counter",
+		"claude_web_requests_total counter",
 		"skills_info gauge",
 		"skills_last_success_timestamp_seconds gauge",
 		"skills_loaded gauge",
@@ -343,6 +349,7 @@ func TestPrometheusExpositionNames(t *testing.T) {
 		`claude_tokens_total{model="claude-haiku-5-5",otel_scope_name="claudeai-api/claude",otel_scope_schema_url="",otel_scope_version="",type="output"} 10`,
 		`claude_cost_usd_total{model="claude-haiku-5-5",otel_scope_name="claudeai-api/claude",otel_scope_schema_url="",otel_scope_version=""} 0.001`,
 		`claude_skill_invocations_total{otel_scope_name="claudeai-api/claude",otel_scope_schema_url="",otel_scope_version="",skill="summarize"} 1`,
+		`claude_web_requests_total{otel_scope_name="claudeai-api/claude",otel_scope_schema_url="",otel_scope_version="",type="search"} 2`,
 		`skills_sync_total{otel_scope_name="claudeai-api/skills",otel_scope_schema_url="",otel_scope_version="",outcome="success"} 1`,
 		`skills_info{commit="0123456789ab",otel_scope_name="claudeai-api/skills",otel_scope_schema_url="",otel_scope_version="",ref="main"} 1`,
 		`skills_loaded{otel_scope_name="claudeai-api/skills",otel_scope_schema_url="",otel_scope_version=""} 1`,

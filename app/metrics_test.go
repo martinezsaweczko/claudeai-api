@@ -73,10 +73,11 @@ func TestClaudeRunObserverRecordsBoundedLabels(t *testing.T) {
 	obs(claude.RunInfo{
 		Model: "gpt-9", ResolvedModel: "", Outcome: "brand-new-outcome", Duration: 3 * time.Second,
 		SkillsInvoked: []string{"summarize", "summarize", "<script>"},
+		WebSearches:   3, WebFetches: 1,
 	})
 	obs(claude.RunInfo{
 		Model: "sonnet", ResolvedModel: "claude-sonnet-5-5", Outcome: claude.OutcomeSuccess, Duration: 2 * time.Second,
-		QueueWait: 0, FirstToken: true, TTFT: time.Second, CostUSD: 0.5,
+		QueueWait: 0, FirstToken: true, TTFT: time.Second, CostUSD: 0.5, WebSearches: 2,
 		Usage: claude.Usage{InputTokens: 1, OutputTokens: 2, CacheCreationTokens: 3, CacheReadTokens: 4},
 	})
 
@@ -100,6 +101,16 @@ func TestClaudeRunObserverRecordsBoundedLabels(t *testing.T) {
 	}
 	if len(bySkill) != 2 || bySkill["summarize"] != 2 || bySkill["other"] != 1 {
 		t.Errorf("skill invocations = %v", bySkill)
+	}
+
+	web := got["claude_web_requests_total"].Data.(metricdata.Sum[int64])
+	byWeb := map[string]int64{}
+	for _, dp := range web.DataPoints {
+		v, _ := dp.Attributes.Value("type")
+		byWeb[v.AsString()] = dp.Value
+	}
+	if len(byWeb) != 2 || byWeb["search"] != 5 || byWeb["fetch"] != 1 {
+		t.Errorf("web requests = %v", byWeb)
 	}
 
 	// TTFT only for the run that produced text; queue wait and duration for both.

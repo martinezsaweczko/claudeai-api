@@ -20,6 +20,7 @@ The service is **stateless**: the client sends the whole conversation on every r
 - [Configuration reference](#configuration-reference)
 - [API](#api)
 - [Skills](#skills)
+- [Web access](#web-access)
 - [Observability](#observability)
 - [Operations](#operations)
 - [Troubleshooting](#troubleshooting)
@@ -195,6 +196,7 @@ All configuration is flags, except secrets (environment variables). `./build/mai
 | `-claude-models` | `sonnet,opus,haiku` | Ids advertised by `GET /v1/models` (no empty entries; duplicates removed; the default model is added if missing). Any model the CLI accepts still works in requests |
 | `-claude-timeout` | `5m` | Max wall time per request |
 | `-claude-max-concurrency` | `4` | Max simultaneous CLI processes in this process (>= 1) |
+| `-claude-web` | `search` | Web tools for the model: `none` (no web access), `search` (WebSearch, executed by Anthropic) or `full` (WebSearch + WebFetch; WebFetch fetches from the gateway host, see [Web access](#web-access)) |
 | `-skills-repo` | empty | Git URL of the skills repository (ssh `git@host:o/r.git`, https, `file://` or a local path; URLs with embedded credentials are rejected). Empty disables skills |
 | `-skills-ref` | `main` | Branch, tag or full commit sha to serve |
 | `-skills-dir` | `<user cache dir>/claudeai-api/skills` | State directory (bare clone cache and read-only `versions/<sha>/`). The image uses `/var/lib/claudeai-api/skills` |
@@ -297,7 +299,7 @@ Optional. Skills (Claude Code `SKILL.md` folders) live in a **separate private g
 ### How it works
 
 1. A background syncer fetches `-skills-ref` into a bare cache, validates the tree (no symlinks, size and count limits, `name` in the frontmatter must equal the directory) and copies **only** the validated skills into a read-only `-skills-dir/versions/<sha>/.claude/skills/<name>/`. Hooks, MCP servers, agents and commands from the repository are never copied.
-2. Each request resolves the current snapshot once, runs the CLI with that directory as its working directory and the flags `--tools Skill --setting-sources project` (and without `--disable-slash-commands`, which also disables skills). A sync that finishes mid-run does not affect running requests.
+2. Each request resolves the current snapshot once, runs the CLI with that directory as its working directory and the flags `--tools Skill --setting-sources project` (plus the web tools when `-claude-web` is not `none`) (and without `--disable-slash-commands`, which also disables skills). A sync that finishes mid-run does not affect running requests.
 3. The system prompt gets one extra sentence telling the model it has skills through the Skill tool and should use one whenever its description matches the request. The model still decides: write clear skill `description`s, since that is what it matches against. Streaming and non-streaming responses contain the same text: only assistant text is forwarded (tool calls and tool results never are), and when the model writes text in several turns (for example a sentence before calling a skill), the turns are joined with a blank line.
 
 `--plugin-dir` is deliberately **not** used: a plugin SessionStart hook executed even with the isolation flags, so a compromised skills repository would get code execution. Skills-only materialization cannot carry hooks.
@@ -338,6 +340,26 @@ curl -X POST http://127.0.0.1:46564/api/v1/skills/refresh   # 202 {"status":"tri
 
 `POST .../refresh` is non-blocking and coalesced; poll `GET .../skills` for the new commit (for example from a repository webhook relay). Both endpoints share the API port and are **protected like `/v1`**: they require the Bearer key when `CLAUDEAI_API_KEYS` is set, and are open (so keep the port on loopback) when it is not. When skills are disabled `GET` answers `{"enabled":false}`.
 
+## Web access
+
+Without web tools the model cannot see anything after its training data and answers "I have no internet access" to questions about recent events. `-claude-web` grants the capability:
+
+| Value | Tools given to the CLI | Notes |
+|---|---|---|
+| `none` | no web tools | Exactly the behavior before this flag existed |
+| `search` (default) | `WebSearch` | Anthropic runs the search server-side and returns result titles and URLs. Nothing is fetched from the gateway host |
+| `full` | `WebSearch` + `WebFetch` | `WebFetch` downloads pages **from the gateway host** (see the SSRF note) |
+
+How it is wired: the web tools are added to `--tools` (next to `Skill` when skills are active) **and** to `--allowedTools`. Both are required: verified with the real CLI, `--tools WebSearch` alone is denied in headless mode ("no approval surface") and the model answers that it could not search. The system prompt gets one extra sentence telling the model to search for recent events, news, scores, prices and anything after its cutoff, and to cite sources. All isolation flags are unchanged.
+
+- **Cost and latency.** A search adds model turns and nested search calls: one real question ("how did the last FC Barcelona match end?", haiku) used 2 searches, 3 turns, about 25-28 s and USD 0.026-0.039 list-price estimate, against about USD 0.004 and a few seconds without web. With the skills prompt the request reported about 31k prompt tokens. Expect `claude_cost_usd_total`, `claude_tokens_total` and `claude_run_duration_seconds` to rise for questions that trigger a search; they do not change for questions that do not.
+- **Data leaves via Anthropic search.** The query the model writes is sent to Anthropic's web search backend. Do not enable it where prompts must never leave the machine for search.
+- **Availability.** WebSearch needs a plan, model and provider that support it (it is not exposed on Amazon Bedrock). If it is unavailable the model answers that the search failed; there is no gateway error.
+- **`full` and SSRF.** `WebFetch` runs on the machine that runs the gateway. A prompt-injected or malicious request can make the model fetch an attacker-chosen URL from there. The CLI documents that it refuses `localhost` and any hostname without a dot; its handling of private, link-local or cloud-metadata IP addresses for `WebFetch` is **not documented** (the rule for private addresses is documented for another tool only), so treat internal addresses as reachable. This is why `full` is opt-in and logs a WARN at startup. Use it only on a host with no sensitive internal network, or behind egress filtering. The fetch also sends the domain to Anthropic for a safety check, and returned page text is summarized by a model, so it can carry injected instructions.
+- **Skills only guide.** The `web-research` skill in the skills repository tells the model how to research (primary sources, dates, citations, no guessing). It cannot grant internet access: without `-claude-web search|full` the tool does not exist.
+
+Sources: <https://code.claude.com/docs/en/tools-reference> (WebFetch and WebSearch tool behavior), <https://code.claude.com/docs/en/security>.
+
 ## Observability
 
 - **Traces**: OTLP gRPC (`-o11-tracer-endpoint tempo:4317`), see [Traces](#traces).
@@ -369,6 +391,7 @@ Claude and skills metrics (meters `claudeai-api/claude` and `claudeai-api/skills
 | `claude_tokens_total` | counter | `model`, `type` | Tokens from the CLI result. `type`: `input` (uncached input only), `output`, `cache_creation`, `cache_read`. Prompt side = `input + cache_creation + cache_read`. The CLI sums every turn of the run, so a run that uses a skill (several turns) counts more than the final prompt. Failed runs that returned usage are counted too. |
 | `claude_cost_usd_total` | counter | `model` | Sum of the CLI `total_cost_usd`: list-price **estimate**, not billing (a Max subscription is not billed per token). |
 | `claude_skill_invocations_total` | counter | `skill` | Skill tool uses seen in the stream. Names not in the currently loaded snapshot count as `other`. |
+| `claude_web_requests_total` | counter | `type` | Web tool uses of a run (`search`, `fetch`), from the result's `modelUsage`/`usage.server_tool_use` and the tool_use blocks, whichever is largest (the real CLI reports searches in `modelUsage` while `usage.server_tool_use` stays 0). Zero while `-claude-web none`. |
 | `skills_sync_total` | counter | `outcome` | Skills repo syncs: `success` (new version materialized), `noop` (commit already current), `error`. |
 | `skills_sync_duration_seconds` | histogram | none | Duration of a sync. Buckets 0.1 .. 60 s. |
 | `skills_loaded` | gauge | none | Skills in the current snapshot (0 without one). Read at scrape time from the syncer. |
@@ -385,7 +408,7 @@ The `skills_*` instruments exist only when `-skills-repo` is set. There is no `c
 
 One request is one trace: the `otelhttp` server span (`POST /v1/chat/completions`) is the parent of `claude.run` (same trace id), streaming or not. Skill syncs are their own traces (`skills.sync`, started by the sync loop or by `POST /api/v1/skills/refresh`).
 
-`claude.run` attributes: `claude.model` (requested, or the default), `claude.model.resolved`, `claude.outcome`, `claude.exit_code`, `claude.duration_ms`, `claude.queue_wait_ms`, `claude.ttft_ms` (only when text was produced), `claude.num_turns`, `claude.tokens.{input,output,cache_creation,cache_read}`, `claude.cost_usd`, `claude.skills.active` (bool, always set), `claude.skills.commit` (12-char commit of the snapshot used, when skills are active) and `claude.skills.invoked` (string array, only when the model used skills). Event `first_token` (attribute `claude.elapsed_ms`) marks the first text delta. Errors are recorded with `RecordError` and an error status. `skills.sync` attributes: `skills.repo`, `skills.ref`, `skills.commit`, `skills.outcome`, `skills.count`, `skills.skipped`. Attributes carry no prompt text. Span attributes are not limited to bounded values (unlike metric labels), so `claude.model` holds whatever the client sent.
+`claude.run` attributes: `claude.model` (requested, or the default), `claude.model.resolved`, `claude.outcome`, `claude.exit_code`, `claude.duration_ms`, `claude.queue_wait_ms`, `claude.ttft_ms` (only when text was produced), `claude.num_turns`, `claude.tokens.{input,output,cache_creation,cache_read}`, `claude.cost_usd`, `claude.skills.active` (bool, always set), `claude.skills.commit` (12-char commit of the snapshot used, when skills are active) and `claude.skills.invoked` (string array, only when the model used skills), `claude.web.search_requests` and `claude.web.fetch_requests` (ints, always set, 0 without web tools). Event `first_token` (attribute `claude.elapsed_ms`) marks the first text delta. Errors are recorded with `RecordError` and an error status. `skills.sync` attributes: `skills.repo`, `skills.ref`, `skills.commit`, `skills.outcome`, `skills.count`, `skills.skipped`. Attributes carry no prompt text. Span attributes are not limited to bounded values (unlike metric labels), so `claude.model` holds whatever the client sent.
 
 ### Forwarding the Claude Code CLI's own telemetry (optional)
 
@@ -409,6 +432,7 @@ The gateway builds each child's environment from its own (`os.Environ`, minus `A
 | `429 rate_limit_exceeded` | Your Max usage limit is reached (shared with Claude Code and every other container using the login). Wait for the window to reset |
 | `504 upstream_timeout` | The request exceeded `-claude-timeout`; raise it for very long generations |
 | `404 model_not_found` | The model name is unknown to the CLI; use `sonnet`, `opus`, `haiku` or a full model id |
+| Answers say "I have no internet access" / cannot check recent events | Web tools are off or unavailable. Check `-claude-web` is `search` or `full` (startup log field `claude_web`), that `claude_web_requests_total` grows after such a question, and that your account/model supports web search (the model says the search failed when it does not). Adding a skill alone does not help: only the flag grants the tool |
 | Skills not loading | `curl -H "Authorization: Bearer <key>" http://127.0.0.1:46564/api/v1/skills` (omit the header when no keys are set): check `enabled`, `commit`, `skipped` reasons and the sync error in the logs. Typical causes: deploy key not readable by uid 1001 or not mode 0600/0400 (see `--userns=keep-id` above), `known_hosts` missing the git host, wrong `-skills-ref`, skill `name` not equal to its directory |
 | Startup error about the skills key or `known_hosts` | The path passed to `-skills-ssh-key` / `-skills-known-hosts` does not exist inside the container; check the `:ro` mounts |
 | `mkdir ... permission denied` for the skills dir | The state directory is not writable by uid 1001: use a named volume, or a tmpfs with `mode=1777` |
@@ -428,9 +452,9 @@ The gateway builds each child's environment from its own (`os.Environ`, minus `A
 - **Secrets** are environment variables only (never flags, never logged). Keep `.env` mode 600 and out of git; prefer your orchestrator's secret store.
 - **Bind addresses** default to loopback. The container binds `0.0.0.0`; publish the port on `127.0.0.1` or behind a TLS reverse proxy with `CLAUDEAI_API_KEYS` set.
 - **One port for everything.** `/metrics` and `POST /api/v1/skills/refresh` share the API port. Without `CLAUDEAI_API_KEYS` they are open to anyone who can reach the port, so publish it on `127.0.0.1` only; with keys set they require the Bearer key. Only health, version and the Swagger UI are always public (the UI itself needs a key only to call protected operations).
-- **Claude isolation.** Each run is a fresh `claude -p` with `--setting-sources`, `--strict-mcp-config`, `--no-chrome` and no tools (`--tools ""`, or only `Skill` when skills are active), `ANTHROPIC_API_KEY` stripped, in its own process group killed on timeout.
+- **Claude isolation.** Each run is a fresh `claude -p` with `--setting-sources`, `--strict-mcp-config`, `--no-chrome` and the smallest tool set (`--tools ""`; `Skill` when skills are active; `WebSearch`/`WebFetch` only per `-claude-web`), `ANTHROPIC_API_KEY` stripped, in its own process group killed on timeout.
 - **Deploy key** is read-only and scoped to the one skills repository; a leaked key allows reading that repository only. Mount it `:ro`.
-- **Skills trust model.** The skills repository is trusted input: its skill text is given to the model, so a compromised repository can inject prompts. The model only has the Skill tool (no shell, files or network tools), which bounds what an injected prompt can do, but it can shape answers. Review skill changes like code. The syncer never executes repository content (bare clone, `ls-tree`/`cat-file`, no checkout, hooks or symlinks).
+- **Skills trust model.** The skills repository is trusted input: its skill text is given to the model, so a compromised repository can inject prompts. The model has no shell or file tools, only `Skill` and, per `-claude-web`, the web tools, which bounds what an injected prompt can do (with `full`, `WebFetch` can reach URLs from the gateway host; see [Web access](#web-access)), but it can shape answers. Review skill changes like code. The syncer never executes repository content (bare clone, `ls-tree`/`cat-file`, no checkout, hooks or symlinks).
 - The CLI reads project settings from its working directory **and its ancestors**: keep `-skills-dir` in a dedicated directory with no `CLAUDE.md` or `.claude/settings*` above it (the image uses `/var/lib/claudeai-api/skills`).
 
 ## Development

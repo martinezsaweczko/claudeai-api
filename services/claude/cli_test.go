@@ -662,7 +662,7 @@ func TestSkillsModeFlagsAndCwd(t *testing.T) {
 				}
 				return
 			}
-			want := buildArgs("sonnet", "be brief", false)
+			want := buildArgs("sonnet", "be brief", false, "")
 			if !reflect.DeepEqual(p.Args, want) {
 				t.Errorf("args = %q, want %q", p.Args, want)
 			}

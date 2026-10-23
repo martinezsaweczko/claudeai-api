@@ -70,6 +70,7 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 	var claudeModels string
 	var claudeTimeout time.Duration
 	var claudeMaxConcurrency int
+	var claudeWeb string
 
 	// Define command-line flags for the optional skills repository
 	var skillsRepo, skillsRef, skillsDir, skillsSSHKey, skillsKnownHosts string
@@ -97,6 +98,7 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 	flag.StringVar(&claudeModels, "claude-models", "sonnet,opus,haiku", "Comma-separated model ids advertised by GET /v1/models (the default model is added if missing)")
 	flag.DurationVar(&claudeTimeout, "claude-timeout", 5*time.Minute, "Max wall time per request")
 	flag.IntVar(&claudeMaxConcurrency, "claude-max-concurrency", 4, "Max simultaneous Claude CLI processes")
+	flag.StringVar(&claudeWeb, "claude-web", WebSearch, "Claude web tools: none (no web access), search (WebSearch, executed by Anthropic) or full (WebSearch + WebFetch; WebFetch fetches from this host, SSRF risk)")
 
 	// Skills flags (disabled when -skills-repo is empty; paths only, no secrets)
 	flag.StringVar(&skillsRepo, "skills-repo", "", "Git URL of the skills repository (ssh, https or file://; no embedded credentials); empty disables skills")
@@ -144,6 +146,7 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 		Model:          claudeModel,
 		Timeout:        claudeTimeout,
 		MaxConcurrency: claudeMaxConcurrency,
+		Web:            strings.TrimSpace(claudeWeb),
 	}
 	if models, err := parseModels(claudeModels, claudeModel); err != nil {
 		listErrors = append(listErrors, err)

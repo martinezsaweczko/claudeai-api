@@ -77,7 +77,7 @@ func TestRenderPrompt(t *testing.T) {
 }
 
 func TestBuildArgs(t *testing.T) {
-	args := buildArgs("sonnet", "be brief", false)
+	args := buildArgs("sonnet", "be brief", false, "")
 	has := func(flag string) int {
 		for i, a := range args {
 			if a == flag {
@@ -139,27 +139,74 @@ func TestFilterEnv(t *testing.T) {
 
 func TestBuildArgsExactLists(t *testing.T) {
 	head := []string{"-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"}
+	build := func(tools, allowed, sources string, slash bool) []string {
+		a := append([]string{}, head...)
+		a = append(a, "--tools", tools)
+		if allowed != "" {
+			a = append(a, "--allowedTools", allowed)
+		}
+		a = append(a, "--no-session-persistence", "--model", "m", "--system-prompt", "s",
+			"--setting-sources", sources, "--strict-mcp-config")
+		if slash {
+			a = append(a, "--disable-slash-commands")
+		}
+		return append(a, "--no-chrome", "--permission-prompts", "none")
+	}
 	tests := []struct {
 		name   string
 		skills bool
+		web    string
 		want   []string
 	}{
-		{"no skills", false, append(append([]string{}, head...),
-			"--tools", "", "--no-session-persistence", "--model", "m", "--system-prompt", "s",
-			"--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
-			"--no-chrome", "--permission-prompts", "none")},
-		{"skills", true, append(append([]string{}, head...),
-			"--tools", "Skill", "--no-session-persistence", "--model", "m", "--system-prompt", "s",
-			"--setting-sources", "project", "--strict-mcp-config",
-			"--no-chrome", "--permission-prompts", "none")},
+		// The first two are the pre-web invocations, byte for byte.
+		{"no skills, web none", false, "none", build("", "", "", true)},
+		{"no skills, web unset", false, "", build("", "", "", true)},
+		{"skills, web none", true, "none", build("Skill", "", "project", false)},
+		{"skills, web unset", true, "", build("Skill", "", "project", false)},
+		{"no skills, search", false, "search", build("WebSearch", "WebSearch", "", true)},
+		{"no skills, full", false, "full", build("WebSearch,WebFetch", "WebSearch,WebFetch", "", true)},
+		{"skills, search", true, "search", build("Skill,WebSearch", "WebSearch", "project", false)},
+		{"skills, full", true, "full", build("Skill,WebSearch,WebFetch", "WebSearch,WebFetch", "project", false)},
+		{"unknown mode enables nothing", false, "bogus", build("", "", "", true)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildArgs("m", "s", tt.skills)
+			got := buildArgs("m", "s", tt.skills, tt.web)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("args =\n%q\nwant\n%q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestComposeSystem(t *testing.T) {
+	tests := []struct {
+		name   string
+		skills bool
+		web    string
+		want   string
+	}{
+		{"nothing", false, "none", "base"},
+		{"skills only", true, "none", "base\n\n" + skillsHint},
+		{"web only", false, "search", "base\n\n" + webHint},
+		{"web full only", false, "full", "base\n\n" + webHint},
+		{"skills then web", true, "search", "base\n\n" + skillsHint + "\n\n" + webHint},
+	}
+	for _, tt := range tests {
+		if got := composeSystem("base", tt.skills, tt.web); got != tt.want {
+			t.Errorf("%s: system = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestWebHint(t *testing.T) {
+	for _, want := range []string{"search the web", "recent events", "news", "scores", "prices", "knowledge cutoff", "cite"} {
+		if !strings.Contains(webHint, want) {
+			t.Errorf("webHint %q does not mention %q", webHint, want)
+		}
+	}
+	if strings.ContainsAny(webHint, "\n") {
+		t.Fatal("webHint must be a single line")
 	}
 }
 

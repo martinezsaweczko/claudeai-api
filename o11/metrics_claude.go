@@ -32,7 +32,8 @@ var (
 // bounded value (the CLI-resolved model id, or the requested model only when it
 // is in the advertised list, else "other"), `outcome` one of the claude.Outcome*
 // values plus "other", `type` one of input|output|cache_creation|cache_read and
-// `skill` a loaded skill name or "other". Callers own that normalization:
+// `skill` a loaded skill name or "other"; for claude_web_requests_total `type`
+// is search|fetch. Callers own that normalization:
 // client-controlled strings must never reach a label.
 type ClaudeMetrics struct {
 	RunsTotal             metric.Int64Counter         // claude_runs_total{model,outcome}
@@ -42,6 +43,7 @@ type ClaudeMetrics struct {
 	TokensTotal           metric.Int64Counter         // claude_tokens_total{model,type}
 	CostUSDTotal          metric.Float64Counter       // claude_cost_usd_total{model}
 	SkillInvocationsTotal metric.Int64Counter         // claude_skill_invocations_total{skill}
+	WebRequestsTotal      metric.Int64Counter         // claude_web_requests_total{type=search|fetch}
 	inFlight              metric.Int64ObservableGauge // claude_runs_in_flight
 
 	meter metric.Meter
@@ -84,6 +86,10 @@ func NewClaudeMetrics(mp metric.MeterProvider) (*ClaudeMetrics, error) {
 	}
 	if c.SkillInvocationsTotal, err = m.Int64Counter("claude_skill_invocations_total",
 		metric.WithDescription("Skill tool uses by skill name (names outside the loaded snapshot are reported as other)")); err != nil {
+		return nil, err
+	}
+	if c.WebRequestsTotal, err = m.Int64Counter("claude_web_requests_total",
+		metric.WithDescription("Web tool uses reported by the CLI result, by type (search|fetch)")); err != nil {
 		return nil, err
 	}
 	if c.inFlight, err = m.Int64ObservableGauge("claude_runs_in_flight",
