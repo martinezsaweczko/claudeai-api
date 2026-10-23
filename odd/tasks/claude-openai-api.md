@@ -24,7 +24,7 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - [x] T1 Strip WhatsApp domain; rename module/meters/app; fix streaming blockers (Flusher/Unwrap on response wrapper, WriteTimeout, Start() swallowing bind errors)
 - [x] T2 Config: Claude section, env-var secrets, Bearer API-key middleware (API key auth is OPTIONAL: no keys => auth disabled)
 - [x] T3 Claude backend interface + CLI implementation (stream-json parsing, errors, fake CLI tests)
-- [ ] T4 `/v1/models` + non-streaming `/v1/chat/completions`
+- [x] T4 `/v1/models` + non-streaming `/v1/chat/completions`
 - [ ] T5 SSE streaming chunks
 - [ ] T6a Create skills repo (plugin marketplace layout, example skill, README) locally
 - [ ] T6b Service-side skills sync (pinned ref, refresh timer/webhook, `--plugin-dir`, version metric)
@@ -62,6 +62,15 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - RED observed first (parser/backend undefined; escaped-descendant test hung 10s against old code).
 - Native review: high risk, consent granted, 4 lenses -> 1 correction round (R3-001/R4-001 CRITICAL: scan loop on StdoutPipe could hang forever if a descendant escaped the process group, leaking the concurrency slot). Fixed via io.Pipe + WaitDelay; targeted validation passed; APPROVED and acknowledged (lineage review-e1391ceb694c1ace). ~20 advisory warnings/suggestions (e.g. services/claude/cli.go:202, render.go:61, app/handlers.go:53-58) not acted on.
 - Open for later: `Close()` not wired into app shutdown (temp cwd lives until exit); unauthenticated real run and very long stdin prompt not exercised against the real CLI.
+### T4 — done
+- Route: delegated direct (one writer). Trigger: new handlers, config flag, wiring, swagger, docs across 20 files.
+- Commits: d9bdc71 `feat: add OpenAI-compatible models and chat completions endpoints` (+2193/-13, mostly tests/docs/swagger); 0e0b0c5 `fix: fail fast when observability is not configured`.
+- Endpoints on the public server under `/v1`: `GET /v1/models`, `GET /v1/models/{model}`, `POST /v1/chat/completions` (non-streaming; `stream:true` -> 400 `streaming_not_supported`, T5 replaces). Chain: tracing -> metrics -> logging -> apiKeyAuth. Flag `-claude-models` (default sonnet,opus,haiku). Rejected with 400: tools/functions, n>1, non-text content parts; ignored: temperature, max_tokens, etc. Errors: ErrBusy 429 server_busy (+Retry-After 1), ErrRateLimited 429, ErrTimeout 504, ErrAuth 502 upstream_auth_error, ErrInvalidModel 404, client cancel 499 with no body; raw CLI stderr never reaches clients.
+- RED observed first (ChatBackend undefined; app routes unwired).
+- Verified by parent: build, vet, gofmt, test -race, mod tidy clean; no leftover processes. Writer smoke: ONE real call via Python urllib (no curl on host): /v1/models 200, chat completions with haiku -> 200 "OK", prompt_tokens 815.
+- Native review: medium risk (slice budget), consent granted, single reliability lens -> APPROVED and acknowledged (lineage review-d630af61c31e2b92). 4 advisory findings: (1) nil-deref of observability in initAndWire - confirmed, but panic was pre-existing in template health handler; fixed in 0e0b0c5 by returning an error; (2) chat.go:294-296 user-final check relies on backend ErrInvalidRequest -> 400 (works, not enforced in handler); (3) chat.go:273 trailing JSON after first value is ignored; (4) chat.go:369 crypto/rand error ignored. (2)-(4) not acted on.
+- Open: `make check-swagger` not run; `Close()` still not wired into shutdown; no new metric instruments (T7).
+
 - Carry-forward: T4/T5 error mapping ErrAuth->401/500, ErrRateLimited->429, ErrBusy->429/503, ErrTimeout->504, ErrInvalidModel->404 model_not_found, ErrInvalidRequest->400, ErrCLI/ErrNotFound->502/500; after SSE starts, errors go as a final SSE error event. T6b must revisit `--tools ""` and `--disable-slash-commands` (they disable skills) alongside `--plugin-dir`, while keeping `--setting-sources ""`. T8 container needs `claude` binary, CLAUDE_CODE_OAUTH_TOKEN secret, writable temp dir.
 
 ## Delivery
