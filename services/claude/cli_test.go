@@ -92,6 +92,18 @@ func TestHelperProcess(t *testing.T) {
 		os.WriteFile(filepath.Join(dir, "pids"), []byte(fmt.Sprintf("%d %d", os.Getpid(), child.Process.Pid)), 0o600)
 		fmt.Println(`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}}`)
 		time.Sleep(time.Hour)
+	case "escape":
+		// Start a grandchild in its own session (outside the process group) that
+		// inherits stdout and holds it open, then hang.
+		child := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$", "--")
+		child.Env = append(os.Environ(), envScenario+"=sleep")
+		child.Stdout = os.Stdout
+		child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := child.Start(); err != nil {
+			os.Exit(98)
+		}
+		os.WriteFile(filepath.Join(dir, "pid"), []byte(strconv.Itoa(child.Process.Pid)), 0o600)
+		time.Sleep(time.Hour)
 	case "sleep":
 		time.Sleep(time.Hour)
 	case "hugeline":
@@ -429,6 +441,40 @@ func TestTimeoutKillsProcessGroup(t *testing.T) {
 		waitFor(t, func() bool { return processGone(pid) })
 		t.Logf("%s pid %d is gone", name, pid)
 	}
+}
+
+// A descendant that escapes the process group and keeps stdout open must not
+// pin Stream (or its concurrency slot) past timeout + WaitDelay.
+func TestEscapedDescendantCannotPinStream(t *testing.T) {
+	dir := t.TempDir()
+	t.Cleanup(func() {
+		if raw, err := os.ReadFile(filepath.Join(dir, "pid")); err == nil {
+			if pid, err := strconv.Atoi(string(raw)); err == nil {
+				syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+	b := newFakeBackend(t, config.ClaudeConfig{Timeout: 300 * time.Millisecond, MaxConcurrency: 1},
+		map[string]string{envScenario: "escape", envDir: dir})
+
+	done := make(chan error, 1)
+	go func() { _, err := b.Complete(context.Background(), simpleReq); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrTimeout) {
+			t.Fatalf("err = %v, want ErrTimeout", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Stream did not return: escaped descendant pinned stdout")
+	}
+
+	// The slot must have been released.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := b.acquire(ctx); err != nil {
+		t.Fatalf("concurrency slot leaked: %v", err)
+	}
+	<-b.sem
 }
 
 func TestParentCancelReturnsContextError(t *testing.T) {

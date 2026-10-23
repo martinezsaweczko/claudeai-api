@@ -22,6 +22,8 @@ func configureProcess(cmd *exec.Cmd) {
 		}
 		return nil
 	}
-	// Close the pipes even if a grandchild escaped the group and still holds them.
+	// Wait force-closes stdout/stderr copying this long after the process exits,
+	// even if a grandchild that escaped the group (setsid) still holds the pipe.
+	// This only works because Stdout is a non-*os.File writer (see Stream).
 	cmd.WaitDelay = 2 * time.Second
 }

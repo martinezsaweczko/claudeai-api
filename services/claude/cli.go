@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -203,10 +204,11 @@ func (b *CLIBackend) Stream(ctx context.Context, req Request, emit func(Event) e
 	cmd.Stderr = stderr
 	configureProcess(cmd)
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: %v", ErrCLI, err)
-	}
+	// A non-*os.File writer makes os/exec own a copy goroutine that WaitDelay
+	// can bound, so Wait returns even if an escaped descendant keeps the OS
+	// pipe open. Wait runs concurrently and closes pw to give the scanner EOF.
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
 	if err := cmd.Start(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, fs.ErrNotExist) {
 			return Result{}, fmt.Errorf("%w: %s", ErrNotFound, sanitize(err.Error()))
@@ -214,9 +216,17 @@ func (b *CLIBackend) Stream(ctx context.Context, req Request, emit func(Event) e
 		return Result{}, fmt.Errorf("%w: starting process: %s", ErrCLI, sanitize(err.Error(), b.cfg.OAuthToken))
 	}
 
+	var waitErr error
+	waited := make(chan struct{})
+	go func() {
+		waitErr = cmd.Wait()
+		pw.Close()
+		close(waited)
+	}()
+
 	parser := newStreamParser()
 	var emitErr error
-	sc := bufio.NewScanner(stdout)
+	sc := bufio.NewScanner(pr)
 	sc.Buffer(make([]byte, scanInitialSize), maxLineBytes)
 scan:
 	for sc.Scan() {
@@ -239,7 +249,8 @@ scan:
 	if scanErr != nil {
 		cancel()
 	}
-	waitErr := cmd.Wait()
+	pr.Close() // unblock the copy goroutine if we stopped reading early
+	<-waited
 	if cmd.ProcessState != nil {
 		exitCode = cmd.ProcessState.ExitCode()
 	}
