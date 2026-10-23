@@ -21,7 +21,7 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - Test-first where a runnable deterministic test exists.
 
 ## Tasks
-- [ ] T1 Strip WhatsApp domain; rename module/meters/app; fix streaming blockers (Flusher/Unwrap on response wrapper, WriteTimeout, Start() swallowing bind errors)
+- [x] T1 Strip WhatsApp domain; rename module/meters/app; fix streaming blockers (Flusher/Unwrap on response wrapper, WriteTimeout, Start() swallowing bind errors)
 - [ ] T2 Config: Claude section, env-var secrets, Bearer API-key middleware
 - [ ] T3 Claude backend interface + CLI implementation (stream-json parsing, errors, fake CLI tests)
 - [ ] T4 `/v1/models` + non-streaming `/v1/chat/completions`
@@ -35,7 +35,14 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 `go build ./... && go vet ./... && gofmt -l . && go test -race ./...` clean after each task.
 
 ## Progress / evidence
-(route per task, commits, check results recorded below)
+### T1 — done
+- Route: delegated direct (one writer). Trigger: 100+ files touched, deletions + rewrites of main/app/config/docs.
+- Commit: 7fab0b8 `refactor: strip WhatsApp domain and fix streaming blockers` (106 files, +332/-19030).
+- RED observed first for: Flush/Unwrap on wrapper, port-in-use returning error from Start(). Public write timeout default now 0.
+- Decisions by writer: config/jwt.go removed (T2 replaces auth with Bearer API keys; JWT middleware/service remain until T2); internal server write timeout fixed at 30s; Makefile keys targets removed; Grafana trimmed to 4 generic rows.
+- Verified by parent: go build, go vet, gofmt -l (empty), go test -race -count=1 ./... all green; no whatsapp/whatsmeow matches.
+- Native review: assessed high risk (review_due). User granted consent, START refused with `lens_context_budget_exceeded` (19k-line deletion diff exceeds reviewer budget; no authority created). Outcome: unavailable, not reviewed. Mostly deleted code, so not split. Later tasks are small enough to review per commit.
+- Not run: container build, `make check-swagger`.
 
 ## Delivery
 Strategy: ask-on-risk (default). Branch: feat/claude-openai-api. Baseline commit c1675a2.
