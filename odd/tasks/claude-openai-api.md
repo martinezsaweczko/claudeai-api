@@ -23,7 +23,7 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 ## Tasks
 - [x] T1 Strip WhatsApp domain; rename module/meters/app; fix streaming blockers (Flusher/Unwrap on response wrapper, WriteTimeout, Start() swallowing bind errors)
 - [x] T2 Config: Claude section, env-var secrets, Bearer API-key middleware (API key auth is OPTIONAL: no keys => auth disabled)
-- [ ] T3 Claude backend interface + CLI implementation (stream-json parsing, errors, fake CLI tests)
+- [x] T3 Claude backend interface + CLI implementation (stream-json parsing, errors, fake CLI tests)
 - [ ] T4 `/v1/models` + non-streaming `/v1/chat/completions`
 - [ ] T5 SSE streaming chunks
 - [ ] T6a Create skills repo (plugin marketplace layout, example skill, README) locally
@@ -53,6 +53,16 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - Verified by parent: build, vet, gofmt, test -race, mod tidy clean; no jwt matches.
 - Native review: high risk (security signal). Consent granted, 4 lenses completed, APPROVED, acknowledged (authority burned, lineage review-f81cf6367f12172d). 13+ non-blocking advisory WARNING/SUGGESTION findings (e.g. app/security.go:34, app/handlers.go:49-51, config/config.go:161, config/claude.go:81-84, README.md:55-76, AGENTS.md:27) were NOT read in detail or acted on; candidate for a cleanup pass.
 - Note: parent used `sed` once to extract a command string, against the user's tooling rule; avoid, sd/fd/bat/eza not installed.
+
+### T3 — done
+- Route: delegated direct (one writer + one scoped correction writer). Trigger: new package, 19 files.
+- Commits: 7706d6f `feat: add Claude CLI backend` (+1740); 6aee1c2 `fix: bound Claude CLI runs against escaped descendants` (+66/-7).
+- Package `services/claude`: `Backend{Stream, Complete}`, `CLIBackend`, typed errors (ErrAuth, ErrRateLimited, ErrTimeout, ErrBusy, ErrCLI, ErrNotFound, ErrInvalidModel, ErrInvalidRequest), span `claude.run`, `WithObserver` hook for T7 metrics. Wired in app.claude, no routes yet.
+- Spike (3 real `claude -p` calls, local Max login): prompt via stdin works; `--setting-sources "" --strict-mcp-config --disable-slash-commands --no-chrome --permission-prompts none` is ESSENTIAL (without them a trivial request loaded hooks/MCP/43 skills: 38,623 vs 868 cache tokens). Failed runs still emit a normal stream; result has `is_error=true` + `api_error_status`, subtype stays "success". `input_tokens` excludes cache tokens: OpenAI prompt_tokens = input + cache_creation + cache_read. History is flattened into a transcript (stream-json input not tested).
+- RED observed first (parser/backend undefined; escaped-descendant test hung 10s against old code).
+- Native review: high risk, consent granted, 4 lenses -> 1 correction round (R3-001/R4-001 CRITICAL: scan loop on StdoutPipe could hang forever if a descendant escaped the process group, leaking the concurrency slot). Fixed via io.Pipe + WaitDelay; targeted validation passed; APPROVED and acknowledged (lineage review-e1391ceb694c1ace). ~20 advisory warnings/suggestions (e.g. services/claude/cli.go:202, render.go:61, app/handlers.go:53-58) not acted on.
+- Open for later: `Close()` not wired into app shutdown (temp cwd lives until exit); unauthenticated real run and very long stdin prompt not exercised against the real CLI.
+- Carry-forward: T4/T5 error mapping ErrAuth->401/500, ErrRateLimited->429, ErrBusy->429/503, ErrTimeout->504, ErrInvalidModel->404 model_not_found, ErrInvalidRequest->400, ErrCLI/ErrNotFound->502/500; after SSE starts, errors go as a final SSE error event. T6b must revisit `--tools ""` and `--disable-slash-commands` (they disable skills) alongside `--plugin-dir`, while keeping `--setting-sources ""`. T8 container needs `claude` binary, CLAUDE_CODE_OAUTH_TOKEN secret, writable temp dir.
 
 ## Delivery
 Strategy: ask-on-risk (default). Branch: feat/claude-openai-api. Baseline commit c1675a2.
