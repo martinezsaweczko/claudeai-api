@@ -5,6 +5,8 @@ This folder contains the Grafana dashboard model for the `claudeai-api` service.
 ## Files
 
 - `dashboard.json` – Grafana dashboard (schema v40). Import it via **Dashboards → Import** in Grafana.
+- `alerts.example.yml` – example Prometheus alert rules (an example to adapt, not tuned values).
+- `dashboard_test.go` – checks the dashboard structure and that every metric and label used by the dashboard and the alert rules exists in the app's real Prometheus exposition.
 
 ## Metrics used
 
@@ -16,14 +18,20 @@ server (default path `/metrics`, configurable with `-o11-prometheus-path`).
 | Variable | Description |
 |----------|-------------|
 | `datasource` | Prometheus data source. |
-| `job` | Hidden regex for the scraped `job` label (defaults to `.+`). Change it via the dashboard settings if your Prometheus job name differs. |
+| `model` | Multi-value query variable (`label_values(claude_runs_total, model)`, includes All) that filters the Claude runs and tokens panels by the `model` label. Only series that already exist appear in the list. |
+| `job` | Hidden regex for the scraped `job` label (defaults to `.+`). Change it via the dashboard settings if your Prometheus job name differs. It is applied to the Go runtime panels only, like the original dashboard; the application metrics are not filtered by job. |
 
 ### Dashboard rows
 
-1. **Executive Summary** - active HTTP requests.
-2. **HTTP Server** - request rate, status codes and p95 latency.
-3. **External APIs** - outbound API call rate, status and latency per dependency.
-4. **System Health** - goroutines, memory RSS and GC duration.
+1. **Executive Summary** - active HTTP requests, Claude success ratio over the time range, Claude runs in flight and skills loaded.
+2. **Claude Runs** - runs/s by outcome, success ratio (5m), errors by outcome, run duration p50/p95/p99, time to first token p50/p95, queue wait p95 with runs in flight.
+3. **Tokens & Cost** - tokens/s by type, estimated cost (last 24h and per hour by model), cache hit ratio, average prompt tokens per run.
+4. **Skills** - skills loaded, seconds since the last successful sync, consecutive sync failures, current commit/ref, sync outcomes and duration, skill invocations.
+5. **HTTP Server** - request rate, status codes and p95 latency.
+6. **External APIs** - outbound API call rate, status and latency per dependency.
+7. **System Health** - goroutines, memory RSS and GC duration.
+
+Cost panels show the Claude CLI's list-price estimate (`total_cost_usd`), not billing. Token panels sum every turn of a run, so a run that uses a skill counts more than its final prompt. The Skills row has no data when `-skills-repo` is not set.
 
 ## Importing
 
@@ -45,6 +53,23 @@ scrape_configs:
 ```
 
 The internal port is configured with `-internal-port` (default `9000`).
+
+## Example alert rules
+
+`alerts.example.yml` is a Prometheus rule file with the group `claudeai-api`: `ClaudeAuthErrors`, `ClaudeRateLimited`, `ClaudeErrorRatioHigh`, `ClaudeTimeToFirstTokenHigh`, `ClaudeBusyRejections`, `SkillsSyncFailing`, `SkillsStale` and `GatewayDown`. Thresholds and severities are starting points. `GatewayDown` uses the placeholder `job="claudeai-api"`; set it to your scrape job name. To load it, copy the file next to your Prometheus configuration and reference it:
+
+```yaml
+rule_files:
+  - /etc/prometheus/rules/claudeai-api.alerts.yml
+```
+
+Validate it with `promtool check rules alerts.example.yml` and reload Prometheus.
+
+## Keeping it in sync with the code
+
+`go test ./grafana/` builds the real Claude and skills instruments, scrapes them through the Prometheus exporter and fails if a dashboard query, the `model` variable or an alert rule uses a metric or label that is not exposed. It only knows the `claude_*` and `skills_*` names; the template metrics (`http_server_*`, `external_api_*`, `go_*`, `process_*`) and `up` are on an explicit allowlist in the test. When you add or rename a metric, update the dashboard and keep that test green.
+
+Rendering is not verified in CI: there is no Grafana in this repository's pipeline, so the layout and panel options were checked only structurally (valid JSON, unique ids, no overlapping grid positions). Import the dashboard into a Grafana 10/11 instance and eyeball it after changing panels.
 
 ## Notes
 

@@ -1,0 +1,103 @@
+# EXAMPLE Prometheus alert rules for claudeai-api. Adapt before use.
+#
+# Thresholds, durations, severities and the job label are starting points, not
+# tuned values. Load the file from prometheus.yml:
+#
+#   rule_files:
+#     - /etc/prometheus/rules/claudeai-api.alerts.yml
+#
+# and check it with: promtool check rules grafana/alerts.example.yml
+#
+# Every metric used here is asserted to exist by grafana/dashboard_test.go.
+groups:
+  - name: claudeai-api
+    rules:
+      - alert: ClaudeAuthErrors
+        # Any run rejected by the CLI for authentication: the OAuth token expired or was revoked.
+        expr: sum(increase(claude_runs_total{outcome="auth"}[5m])) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Claude CLI authentication is failing"
+          description: "{{ $value | printf \"%.0f\" }} Claude runs failed with an auth error in the last 5 minutes. Check CLAUDE_CODE_OAUTH_TOKEN or the stored CLI login."
+
+      - alert: ClaudeRateLimited
+        # The CLI reported a usage or rate limit.
+        expr: sum(increase(claude_runs_total{outcome="rate_limited"}[10m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Claude runs are being rate limited"
+          description: "{{ $value | printf \"%.0f\" }} Claude runs hit a rate or usage limit in the last 10 minutes."
+
+      - alert: ClaudeErrorRatioHigh
+        # Every outcome except success counts (including canceled and busy).
+        # The second condition is the minimum traffic guard: at least 10 runs in the window.
+        expr: |
+          (
+            sum(increase(claude_runs_total{outcome!="success"}[10m]))
+            / sum(increase(claude_runs_total[10m]))
+          ) > 0.10
+          and sum(increase(claude_runs_total[10m])) >= 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 10% of Claude runs are failing"
+          description: "{{ $value | humanizePercentage }} of Claude runs did not succeed over the last 10 minutes. See the Claude Runs row (errors by outcome) of the dashboard."
+
+      - alert: ClaudeTimeToFirstTokenHigh
+        # p95 above 20 s; the guard requires at least 10 runs that produced text in the window.
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(claude_time_to_first_token_seconds_bucket[10m]))) > 20
+          and sum(increase(claude_time_to_first_token_seconds_count[10m])) >= 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Claude time to first token p95 is above 20s"
+          description: "p95 time to first token is {{ $value | humanizeDuration }}. It includes the wait for a concurrency slot and the extra turn of a skill tool call."
+
+      - alert: ClaudeBusyRejections
+        # Callers gave up before a concurrency slot became free.
+        expr: sum(increase(claude_runs_total{outcome="busy"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Requests are rejected because every Claude slot is busy"
+          description: "{{ $value | printf \"%.0f\" }} runs found no free slot in the last 5 minutes. Consider raising -claude-max-concurrency if the host has the capacity."
+
+      - alert: SkillsSyncFailing
+        expr: skills_sync_consecutive_failures >= 3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Skills repository sync keeps failing"
+          description: "{{ $value }} consecutive skills syncs failed. The service keeps serving the last good snapshot; check the deploy key, known_hosts and the repository URL."
+
+      - alert: SkillsStale
+        # skills_loaded > 0 restricts it to instances that really have a snapshot.
+        expr: |
+          time() - skills_last_success_timestamp_seconds > 3600
+          and skills_loaded > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Skills have not been synced successfully for over an hour"
+          description: "The last successful skills sync was {{ $value | humanizeDuration }} ago."
+
+      - alert: GatewayDown
+        # PLACEHOLDER: replace job="claudeai-api" with the job_name of the scrape config
+        # that targets the internal port (see grafana/README.md).
+        expr: up{job="claudeai-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "claudeai-api is not being scraped"
+          description: "Prometheus cannot scrape {{ $labels.instance }} (job {{ $labels.job }}); the service is down or its internal port is unreachable."

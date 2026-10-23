@@ -293,6 +293,8 @@ The `skills_*` instruments exist only when `-skills-repo` is set. There is no `c
 
 **Cardinality rule.** A label value may only come from a bounded set. Client-controlled strings (the `model` field of a request, skill names the model emits) must never create series: `model` is the model id the CLI reports when it ran (a bounded set of real ids), otherwise the requested model only if it is in `-claude-models` or is the default model, else `other`; `skill` is a loaded skill name or `other`; `outcome` and `type` are fixed enums. New labels must follow the same rule (normalize in `app/metrics.go`, test the normalizer). Observers are cheap, non-blocking and panic-safe; a metrics bug cannot fail a request or a sync.
 
+A Grafana dashboard and example Prometheus alert rules for these metrics are in [`grafana/`](grafana/README.md). `go test ./grafana/` fails if the dashboard or the alerts reference a metric or label that the app does not expose.
+
 ### Traces
 
 One request is one trace: the `otelhttp` server span (`POST /v1/chat/completions`) is the parent of `claude.run` (same trace id), streaming or not. Skill syncs are their own traces (`skills.sync`, started by the sync loop or by `POST /api/v1/skills/refresh`).
