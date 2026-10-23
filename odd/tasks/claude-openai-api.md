@@ -26,7 +26,7 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - [x] T3 Claude backend interface + CLI implementation (stream-json parsing, errors, fake CLI tests)
 - [x] T4 `/v1/models` + non-streaming `/v1/chat/completions`
 - [x] T5 SSE streaming chunks
-- [ ] T6a Create skills repo (plugin marketplace layout, example skill, README) locally
+- [x] T6a Create skills repo (plugin marketplace layout, example skill, README) locally
 - [ ] T6b Service-side skills sync (pinned ref, refresh timer/webhook, `--plugin-dir`, version metric)
 - [ ] T7 Metrics + traces (requests, latency, TTFT, tokens, cost, process errors, skills version; spans; Grafana)
 - [ ] T8 Containerfile with `claude` binary, CI cleanup, README
@@ -80,6 +80,14 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - Verified by parent: build, vet, gofmt, test -race, mod tidy clean; no leftover processes. Tests include incremental delivery over a real httptest.Server and through the full middleware chain (tracing, metrics, logging, apiKeyAuth), 3x flake run. Writer smoke: ONE real streaming call (haiku): first delta at 2.12s, finish at 2.89s, usage 830/11; CLI batches several tokens per delta.
 - Native review: medium risk, consent granted, single reliability lens -> APPROVED and acknowledged (lineage review-0d6bc2b8144532fa). 2 advisory warnings: (1) `stream_options` is decoded for all requests, so a malformed `stream_options` on a non-streaming request now gets 400 instead of being ignored; (2) `ChatBackend` gained `Stream` (all in-repo fakes updated). Neither acted on.
 - Open: `make check-swagger` not run; `Close()` still not wired into shutdown; no new metric instruments (T7).
+
+### T6a — done (local only)
+- Route: inline (5 small mechanical files; format verified against code.claude.com plugin-marketplaces + plugin manifest reference first).
+- Repo: `/home/david/Externo/claudeai-skills` (sibling dir, separate git repo, branch main), commit 41e630a `feat: add core-skills plugin with summarize skill`. NOT pushed, no remote created.
+- Layout: marketplace `api-skills` (`.claude-plugin/marketplace.json`) -> plugin `core-skills` (`plugins/core-skills/.claude-plugin/plugin.json`, no `version` on purpose so each commit is a new version) -> skill `summarize` (`skills/summarize/SKILL.md`). Skill is invoked as `/core-skills:summarize`. README documents how to add skills and validate. Names avoid the reserved `claude-`/`anthropic-` prefixes.
+- Verified: `claude plugin validate .` and `./plugins/core-skills` pass (one expected warning: missing version; `--strict` would fail on it). Not yet verified: that the skill actually loads in a `claude -p` run via `--plugin-dir` (T6b must prove it, given `--tools ""` and `--disable-slash-commands` currently block skills).
+- Review: assessment vs the empty tree = medium risk, 99 lines, review_due false (under_budget). Note: a bare root-commit assess (no base-ref) reports 0 lines and bogus high risk; use `--base-ref 4b825dc642cb6eb9a060e54bf8d69288fbee4904`.
+- Pending user decision: creating the remote GitHub repo (name/owner/visibility) and pushing.
 
 - Carry-forward: T4/T5 error mapping ErrAuth->401/500, ErrRateLimited->429, ErrBusy->429/503, ErrTimeout->504, ErrInvalidModel->404 model_not_found, ErrInvalidRequest->400, ErrCLI/ErrNotFound->502/500; after SSE starts, errors go as a final SSE error event. T6b must revisit `--tools ""` and `--disable-slash-commands` (they disable skills) alongside `--plugin-dir`, while keeping `--setting-sources ""`. T8 container needs `claude` binary, CLAUDE_CODE_OAUTH_TOKEN secret, writable temp dir.
 
