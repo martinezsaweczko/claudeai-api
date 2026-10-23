@@ -28,6 +28,10 @@ func (app *App) initAndWire() error {
 	cfg := app.config
 	log := app.log
 
+	if app.observability == nil || app.observability.MeterProvider == nil {
+		return fmt.Errorf("observability with a meter provider is required (call WithObservability)")
+	}
+
 	// ----- HTTP handlers -----
 	healthHandlerConf := handlers.HealthHandlerConfig{
 		Log:           log,

@@ -134,3 +134,22 @@ func TestV1RoutesAndAPIKeyAuth(t *testing.T) {
 		}
 	})
 }
+
+func TestInitAndWireRequiresObservability(t *testing.T) {
+	cfg := &config.Config{Claude: config.ClaudeConfig{
+		Bin: "claude", Model: "sonnet", Models: []string{"sonnet"},
+		Timeout: time.Minute, MaxConcurrency: 1,
+	}}
+	a := NewApp(cfg).
+		WithPublicServer(newMuxServer()).
+		WithInternalServer(newMuxServer()).
+		WithLog(slog.New(slog.NewTextHandler(io.Discard, nil))).
+		WithBuildInfo(model.BuildInfo{Version: "test"}).
+		WithBasePath("/api/v1")
+	a.lookupEnv = func(string) (string, bool) { return "", false }
+	a.claude = &stubBackend{}
+
+	if err := a.initAndWire(); err == nil {
+		t.Fatal("initAndWire without observability: want an error, got nil")
+	}
+}
