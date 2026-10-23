@@ -93,11 +93,11 @@ groups:
 
       - alert: GatewayDown
         # PLACEHOLDER: replace job="claudeai-api" with the job_name of the scrape config
-        # that targets the internal port (see grafana/README.md).
+        # that targets the service port 46564 (see grafana/README.md).
         expr: up{job="claudeai-api"} == 0
         for: 2m
         labels:
           severity: critical
         annotations:
           summary: "claudeai-api is not being scraped"
-          description: "Prometheus cannot scrape {{ $labels.instance }} (job {{ $labels.job }}); the service is down or its internal port is unreachable."
+          description: "Prometheus cannot scrape {{ $labels.instance }} (job {{ $labels.job }}); the service is down, its port (46564) is unreachable, or the Bearer key of the scrape config is wrong."

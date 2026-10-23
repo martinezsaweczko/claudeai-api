@@ -199,7 +199,9 @@ definitions:
     type: object
 info:
   contact: {}
-  description: OpenAI-compatible HTTP API backed by the Claude Code CLI.
+  description: 'OpenAI-compatible HTTP API backed by the Claude Code CLI. One server,
+    one port: /v1/*, /metrics and /api/v1/skills* require the API key when CLAUDEAI_API_KEYS
+    is set; /api/v1/health, /api/v1/version and this documentation are always public.'
   license:
     name: MIT
   title: Claude OpenAI-compatible API
@@ -222,9 +224,9 @@ paths:
       - System
   /api/v1/skills:
     get:
-      description: 'Lists the skills of the current snapshot and the health of the
+      description: Lists the skills of the current snapshot and the health of the
         sync. Returns `{"enabled":false}` when no skills repository is configured.
-        Internal port only: unauthenticated.'
+        Requires the API key when CLAUDEAI_API_KEYS is set.
       produces:
       - application/json
       responses:
@@ -232,14 +234,21 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/handlers.skillsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.openAIErrorDoc'
+      security:
+      - BearerAuth: []
       summary: Skills status
       tags:
       - Skills
   /api/v1/skills/refresh:
     post:
-      description: 'Asks the background syncer to sync now (non-blocking, coalesced)
+      description: Asks the background syncer to sync now (non-blocking, coalesced)
         and returns 202. Poll `GET /api/v1/skills` for the result. 404 `skills_disabled`
-        when no skills repository is configured. Internal port only: unauthenticated.'
+        when no skills repository is configured. Requires the API key when CLAUDEAI_API_KEYS
+        is set.
       produces:
       - application/json
       responses:
@@ -247,10 +256,16 @@ paths:
           description: Accepted
           schema:
             $ref: '#/definitions/handlers.skillsRefreshResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.openAIErrorDoc'
         "404":
           description: Not Found
           schema:
             $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - BearerAuth: []
       summary: Trigger a skills sync
       tags:
       - Skills
@@ -279,6 +294,13 @@ paths:
           description: Prometheus metrics text
           schema:
             type: string
+        "401":
+          description: Missing or invalid API key (only when CLAUDEAI_API_KEYS is
+            set)
+          schema:
+            $ref: '#/definitions/handlers.openAIErrorDoc'
+      security:
+      - BearerAuth: []
       summary: Prometheus metrics
       tags:
       - System

@@ -26,7 +26,7 @@ var (
 
 // @title Claude OpenAI-compatible API
 // @version 1.0.0
-// @description OpenAI-compatible HTTP API backed by the Claude Code CLI.
+// @description OpenAI-compatible HTTP API backed by the Claude Code CLI. One server, one port: /v1/*, /metrics and /api/v1/skills* require the API key when CLAUDEAI_API_KEYS is set; /api/v1/health, /api/v1/version and this documentation are always public.
 //
 // @license.name MIT
 //
@@ -82,8 +82,8 @@ func main() {
 		}
 	}()
 
-	// HTTP servers
-	publicServer := (&http_server.HTTPServerConfig{
+	// The single HTTP server (API, health, metrics, Swagger, skills)
+	server := (&http_server.HTTPServerConfig{
 		Addr:         cfg.HttpServer.Address,
 		Port:         cfg.HttpServer.Port,
 		Timeout:      cfg.HttpServer.Timeout,
@@ -92,19 +92,9 @@ func main() {
 		Log:          log,
 	}).New()
 
-	internalServer := (&http_server.HTTPServerConfig{
-		Addr:         cfg.InternalServer.Address,
-		Port:         cfg.InternalServer.Port,
-		Timeout:      cfg.InternalServer.Timeout,
-		ReadTimeout:  cfg.InternalServer.ReadTimeout,
-		WriteTimeout: cfg.InternalServer.WriteTimeout,
-		Log:          log,
-	}).New()
-
 	// Build app with all dependencies injected
 	application := app.NewApp(cfg).
-		WithPublicServer(publicServer).
-		WithInternalServer(internalServer).
+		WithServer(server).
 		WithLog(log).
 		WithObservability(&observabilityInst).
 		WithBuildInfo(model.BuildInfo{
@@ -123,15 +113,24 @@ func main() {
 	log.Info("Application terminated")
 }
 
-// healthCheck queries the internal server health endpoint and returns 0 on success
+// defaultHealthPort is the single server's default port (-http-port).
+const defaultHealthPort = "46564"
+
+// healthCheck queries the local health endpoint (public, no API key needed)
+// and returns 0 on success. It connects over loopback, which works for a server
+// bound to 127.0.0.1 or 0.0.0.0.
 func healthCheck() int {
-	port := "9000"
+	port := defaultHealthPort
 	if len(os.Args) > 2 {
 		port = os.Args[2]
 	}
+	return probeHealth("http://127.0.0.1:" + port + "/api/v1/health")
+}
 
+// probeHealth GETs url and returns 0 only for a 200 answer.
+func probeHealth(url string) int {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("http://localhost:" + port + "/api/v1/health")
+	resp, err := client.Get(url)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "health check failed: %v\n", err)
 		return 1

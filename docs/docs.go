@@ -43,7 +43,7 @@ const docTemplate = `{
         },
         "/api/v1/skills": {
             "get": {
-                "description": "Lists the skills of the current snapshot and the health of the sync. Returns ` + "`" + `{\"enabled\":false}` + "`" + ` when no skills repository is configured. Internal port only: unauthenticated.",
+                "description": "Lists the skills of the current snapshot and the health of the sync. Returns ` + "`" + `{\"enabled\":false}` + "`" + ` when no skills repository is configured. Requires the API key when CLAUDEAI_API_KEYS is set.",
                 "produces": [
                     "application/json"
                 ],
@@ -57,13 +57,24 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/handlers.skillsResponse"
                         }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/skills/refresh": {
             "post": {
-                "description": "Asks the background syncer to sync now (non-blocking, coalesced) and returns 202. Poll ` + "`" + `GET /api/v1/skills` + "`" + ` for the result. 404 ` + "`" + `skills_disabled` + "`" + ` when no skills repository is configured. Internal port only: unauthenticated.",
+                "description": "Asks the background syncer to sync now (non-blocking, coalesced) and returns 202. Poll ` + "`" + `GET /api/v1/skills` + "`" + ` for the result. 404 ` + "`" + `skills_disabled` + "`" + ` when no skills repository is configured. Requires the API key when CLAUDEAI_API_KEYS is set.",
                 "produces": [
                     "application/json"
                 ],
@@ -78,13 +89,24 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.skillsRefreshResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
                     "404": {
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.errorResponse"
                         }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/version": {
@@ -126,8 +148,19 @@ const docTemplate = `{
                         "schema": {
                             "type": "string"
                         }
+                    },
+                    "401": {
+                        "description": "Missing or invalid API key (only when CLAUDEAI_API_KEYS is set)",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
                     }
-                }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
             }
         },
         "/v1/chat/completions": {
@@ -610,7 +643,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "",
 	Schemes:          []string{},
 	Title:            "Claude OpenAI-compatible API",
-	Description:      "OpenAI-compatible HTTP API backed by the Claude Code CLI.",
+	Description:      "OpenAI-compatible HTTP API backed by the Claude Code CLI. One server, one port: /v1/*, /metrics and /api/v1/skills* require the API key when CLAUDEAI_API_KEYS is set; /api/v1/health, /api/v1/version and this documentation are always public.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

@@ -17,12 +17,11 @@ services:
     # Secrets come from the environment, not from flags (flags show up in `ps`).
     env_file: .env
 
-    # The image already passes -http-address 0.0.0.0 -internal-address 0.0.0.0
+    # The image already passes -http-address 0.0.0.0
     # -skills-dir /var/lib/claudeai-api/skills. Flags given here REPLACE that CMD,
-    # so repeat the three above when you override it.
+    # so repeat the two above when you override it.
     command:
       - -http-address=0.0.0.0
-      - -internal-address=0.0.0.0
       - -skills-dir=/var/lib/claudeai-api/skills
       - -claude-max-concurrency=4        # simultaneous claude processes PER CONTAINER
       - -claude-timeout=5m
@@ -32,11 +31,11 @@ services:
       - -skills-known-hosts=/run/secrets/known_hosts
       - -skills-refresh=5m
 
-    # Public port on the host loopback ONLY. The container binds 0.0.0.0 without
-    # keys, so never publish it as "46564:46564" unless CLAUDEAI_API_KEYS is set.
-    # The internal port (9000: health, metrics, unauthenticated skills endpoints)
-    # is deliberately NOT published; reach it from the compose network
-    # (for example a Prometheus service scraping gateway:9000).
+    # The single port (API, health, /metrics, Swagger, skills) on the host loopback
+    # ONLY. The container binds 0.0.0.0 without keys, so never publish it as
+    # "46564:46564" unless CLAUDEAI_API_KEYS is set: /metrics and the skills
+    # endpoints are on the same port. Other compose services (for example
+    # Prometheus) reach it as gateway:46564 with the Bearer key when keys are set.
     ports:
       - "127.0.0.1:46564:46564"
 

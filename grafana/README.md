@@ -10,8 +10,8 @@ This folder contains the Grafana dashboard model for the `claudeai-api` service.
 
 ## Metrics used
 
-The dashboard consumes Prometheus metrics exposed by the service on its internal
-server (default path `/metrics`, configurable with `-o11-prometheus-path`).
+The dashboard consumes Prometheus metrics exposed by the service on its single HTTP
+port (default 46564, path `/metrics`, configurable with `-o11-prometheus-path`).
 
 ### Variables
 
@@ -42,17 +42,22 @@ Cost panels show the Claude CLI's list-price estimate (`total_cost_usd`), not bi
 
 ## Prometheus scrape requirements
 
-Make sure Prometheus scrapes the service's internal HTTP endpoint, e.g.:
+Make sure Prometheus scrapes the service's HTTP port (the same one as the API), e.g.:
 
 ```yaml
 scrape_configs:
   - job_name: 'claudeai-api'
     static_configs:
-      - targets: ['localhost:9000']
+      - targets: ['localhost:46564']
     metrics_path: '/metrics'
+    # Only when CLAUDEAI_API_KEYS is set: /metrics then requires a Bearer key.
+    authorization:
+      type: Bearer
+      credentials: <one of the CLAUDEAI_API_KEYS>   # or credentials_file: /path/to/key
 ```
 
-The internal port is configured with `-internal-port` (default `9000`).
+The port is configured with `-http-port` (default `46564`). Without
+`CLAUDEAI_API_KEYS`, `/metrics` is open: keep the port on a private interface.
 
 ## Example alert rules
 

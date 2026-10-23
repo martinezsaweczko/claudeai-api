@@ -39,11 +39,11 @@ const (
 // binary is a shell script replaying a recorded stream, with an in-memory
 // span recorder, a Prometheus registry and a JSON log buffer.
 type obsEnv struct {
-	public, internal *muxServer
-	spans            *tracetest.SpanRecorder
-	reg              *prom.Registry
-	logs             *bytes.Buffer
-	app              *App
+	srv   *muxServer
+	spans *tracetest.SpanRecorder
+	reg   *prom.Registry
+	logs  *bytes.Buffer
+	app   *App
 }
 
 type obsOpts struct {
@@ -81,10 +81,9 @@ func newObsEnv(t *testing.T, o obsOpts) *obsEnv {
 		Bin: script, Model: "sonnet", Models: []string{"sonnet", "opus"},
 		Timeout: time.Minute, MaxConcurrency: 2,
 	}}
-	public, internal := newMuxServer(), newMuxServer()
+	srv := newMuxServer()
 	a := NewApp(cfg).
-		WithPublicServer(public).
-		WithInternalServer(internal).
+		WithServer(srv).
 		WithLog(log).
 		WithObservability(&o11.ObservabilityInst{Trace: tp, MeterProvider: mp}).
 		WithBuildInfo(model.BuildInfo{Version: "test"}).
@@ -97,7 +96,7 @@ func newObsEnv(t *testing.T, o obsOpts) *obsEnv {
 		t.Fatalf("initAndWire: %v", err)
 	}
 	t.Cleanup(func() { _ = a.closeBackend() })
-	return &obsEnv{public: public, internal: internal, spans: sr, reg: reg, logs: logs, app: a}
+	return &obsEnv{srv: srv, spans: sr, reg: reg, logs: logs, app: a}
 }
 
 func mustAbs(t *testing.T, p string) string {
@@ -200,7 +199,7 @@ func endedByName(t *testing.T, sr *tracetest.SpanRecorder, name string) sdktrace
 func TestChatMetricsThroughRealWiring(t *testing.T) {
 	t.Run("success uses the resolved model", func(t *testing.T) {
 		e := newObsEnv(t, obsOpts{fixture: fixtureSuccess})
-		if rec := do(e.public, "POST", "/v1/chat/completions", "", chatReq("sonnet", false)); rec.Code != 200 {
+		if rec := do(e.srv, "POST", "/v1/chat/completions", "", chatReq("sonnet", false)); rec.Code != 200 {
 			t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 		}
 		text := e.scrape(t)
@@ -226,9 +225,9 @@ func TestChatMetricsThroughRealWiring(t *testing.T) {
 
 	t.Run("unknown requested model on a failed run is other", func(t *testing.T) {
 		e := newObsEnv(t, obsOpts{fixture: fixtureAuth, exit: 1})
-		do(e.public, "POST", "/v1/chat/completions", "", chatReq("gpt-4o-INJECT-1", false))
-		do(e.public, "POST", "/v1/chat/completions", "", chatReq("gpt-4o-INJECT-2", false))
-		do(e.public, "POST", "/v1/chat/completions", "", chatReq("opus", false))
+		do(e.srv, "POST", "/v1/chat/completions", "", chatReq("gpt-4o-INJECT-1", false))
+		do(e.srv, "POST", "/v1/chat/completions", "", chatReq("gpt-4o-INJECT-2", false))
+		do(e.srv, "POST", "/v1/chat/completions", "", chatReq("opus", false))
 		text := e.scrape(t)
 		e.wantSample(t, text, "claude_runs_total", "2", `model="other"`, `outcome="auth"`)
 		e.wantSample(t, text, "claude_runs_total", "1", `model="opus"`, `outcome="auth"`)
@@ -244,7 +243,7 @@ func TestChatMetricsThroughRealWiring(t *testing.T) {
 	t.Run("skill invocation counted for loaded skills only", func(t *testing.T) {
 		syncer, _ := skillSnapshot(t)
 		e := newObsEnv(t, obsOpts{fixture: fixtureSkill, skills: syncer})
-		do(e.public, "POST", "/v1/chat/completions", "", chatReq("haiku", false))
+		do(e.srv, "POST", "/v1/chat/completions", "", chatReq("haiku", false))
 		text := e.scrape(t)
 		e.wantSample(t, text, "claude_skill_invocations_total", "1", `skill="summarize"`)
 
@@ -252,7 +251,7 @@ func TestChatMetricsThroughRealWiring(t *testing.T) {
 		syncer2, _ := skillSnapshot(t)
 		syncer2.snap.Skills = []skills.SkillInfo{{Name: "translate"}}
 		e2 := newObsEnv(t, obsOpts{fixture: fixtureSkill, skills: syncer2})
-		do(e2.public, "POST", "/v1/chat/completions", "", chatReq("haiku", false))
+		do(e2.srv, "POST", "/v1/chat/completions", "", chatReq("haiku", false))
 		e2.wantSample(t, e2.scrape(t), "claude_skill_invocations_total", "1", `skill="other"`)
 	})
 
@@ -301,7 +300,7 @@ func mustSkillsMetrics(t *testing.T, e *obsEnv) *o11.SkillsMetrics {
 func TestTraceShapeNonStreaming(t *testing.T) {
 	syncer, commit := skillSnapshot(t)
 	e := newObsEnv(t, obsOpts{fixture: fixtureSkill, skills: syncer})
-	if rec := do(e.public, "POST", "/v1/chat/completions", "", chatReq("haiku", false)); rec.Code != 200 {
+	if rec := do(e.srv, "POST", "/v1/chat/completions", "", chatReq("haiku", false)); rec.Code != 200 {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	assertRequestTrace(t, e, commit)
@@ -310,7 +309,7 @@ func TestTraceShapeNonStreaming(t *testing.T) {
 func TestTraceShapeStreaming(t *testing.T) {
 	syncer, commit := skillSnapshot(t)
 	e := newObsEnv(t, obsOpts{fixture: fixtureSkill, skills: syncer})
-	rec := do(e.public, "POST", "/v1/chat/completions", "", chatReq("haiku", true))
+	rec := do(e.srv, "POST", "/v1/chat/completions", "", chatReq("haiku", true))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "[DONE]") {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
@@ -371,7 +370,7 @@ func assertRequestTrace(t *testing.T, e *obsEnv, commit string) {
 
 func TestLogsCarryTraceIDsOnTheRequestPath(t *testing.T) {
 	e := newObsEnv(t, obsOpts{fixture: fixtureAuth, exit: 1})
-	do(e.public, "POST", "/v1/chat/completions", "", chatReq("sonnet", false))
+	do(e.srv, "POST", "/v1/chat/completions", "", chatReq("sonnet", false))
 
 	server := endedByName(t, e.spans, "POST /v1/chat/completions")
 	wantTrace := server.SpanContext().TraceID().String()
@@ -406,7 +405,7 @@ func TestLogsCarryTraceIDsOnTheRequestPath(t *testing.T) {
 func TestSkillsRefreshLogCarriesTraceID(t *testing.T) {
 	syncer, _ := skillSnapshot(t)
 	e := newObsEnv(t, obsOpts{fixture: fixtureSuccess, skills: syncer})
-	if rec := do(e.internal, "POST", "/api/v1/skills/refresh", "", ""); rec.Code != 202 {
+	if rec := do(e.srv, "POST", "/api/v1/skills/refresh", "", ""); rec.Code != 202 {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	var found bool
@@ -427,8 +426,8 @@ func TestSkillsRefreshLogCarriesTraceID(t *testing.T) {
 func TestMetricsEndpointNeverBreaksWithoutSkills(t *testing.T) {
 	// A wired app with the plain stub backend (no CLIBackend) must not need an
 	// observer or in-flight source.
-	public, _, be := wiredServers(t, nil)
-	if rec := do(public, "POST", "/v1/chat/completions", "", chatBody); rec.Code != 200 || be.calls != 1 {
+	srv, be := wiredServer(t, nil)
+	if rec := do(srv, "POST", "/v1/chat/completions", "", chatBody); rec.Code != 200 || be.calls != 1 {
 		t.Fatalf("status %d calls %d", rec.Code, be.calls)
 	}
 }

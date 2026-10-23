@@ -104,15 +104,17 @@ WORKDIR /home/appuser
 # Mount points (see README / compose.example.yaml):
 #   /var/lib/claudeai-api  skills state (disposable cache; a volume or tmpfs, owned by uid 1001)
 #   /run/secrets/          read-only deploy key + known_hosts, readable by uid 1001
-# Only the public port is published; the internal port (9000: health, metrics,
-# unauthenticated skills endpoints) stays on the container network.
+# One server, one port: the API, health, metrics, Swagger and the skills
+# endpoints all share 46564. Publish it on 127.0.0.1 only, or set CLAUDEAI_API_KEYS
+# (health, version and the docs stay public; the rest requires the key).
 EXPOSE 46564
 
-# Internal API health check
+# Health is public (no API key needed) and answers on the single port, which is
+# the default of -health-check
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["/usr/local/bin/claudeai-api", "-health-check"]
 
 ENTRYPOINT ["/usr/local/bin/claudeai-api"]
 # The container must listen on every interface so the published port works; the
 # host-side default stays loopback. Publish with -p 127.0.0.1:46564:46564.
-CMD ["-http-address", "0.0.0.0", "-internal-address", "0.0.0.0", "-skills-dir", "/var/lib/claudeai-api/skills"]
+CMD ["-http-address", "0.0.0.0", "-skills-dir", "/var/lib/claudeai-api/skills"]

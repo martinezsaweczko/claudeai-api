@@ -76,7 +76,7 @@ func TestStreamingThroughMiddlewareChain(t *testing.T) {
 				}
 			}
 			defer release()
-			public, _ := wiredServersWith(t, tc.keys, be)
+			public := wiredServerWith(t, tc.keys, be)
 			srv := httptest.NewServer(public.mux)
 			defer srv.Close()
 
@@ -126,7 +126,7 @@ func TestStreamingThroughMiddlewareChain(t *testing.T) {
 
 func TestStreamingWithoutAPIKeyIsJSON401(t *testing.T) {
 	be := &gatedBackend{release: make(chan struct{})}
-	public, _ := wiredServersWith(t, []string{"secret"}, be)
+	public := wiredServerWith(t, []string{"secret"}, be)
 	srv := httptest.NewServer(public.mux)
 	defer srv.Close()
 

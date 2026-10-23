@@ -26,7 +26,7 @@ func logClaudeStartup(log *slog.Logger, cfg *config.Config, lookupEnv func(strin
 		"timeout", c.Timeout)
 
 	if !c.AuthEnabled() && !isLoopbackAddress(cfg.HttpServer.Address) {
-		log.Warn("API is unauthenticated and reachable beyond localhost: set CLAUDEAI_API_KEYS, bind -http-address to 127.0.0.1, or (in a container) publish the port on 127.0.0.1 only",
+		log.Warn("The server is unauthenticated and reachable beyond localhost: the API, /metrics and skills refresh are all open on this single port; set CLAUDEAI_API_KEYS, bind -http-address to 127.0.0.1, or (in a container) publish the port on 127.0.0.1 only",
 			"http_address", cfg.HttpServer.Address)
 	}
 

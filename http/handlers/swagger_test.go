@@ -50,7 +50,7 @@ func TestSwaggerRoutesWithBasePath(t *testing.T) {
 	router := &swaggerRouter{routes: make(map[string]bool)}
 	h.RegisterRoutes(router)
 
-	for _, path := range []string{"/api/v1/docs", "/api/v1/docs/"} {
+	for _, path := range []string{"/api/v1/docs", "/api/v1/docs/", "/docs", "/docs/"} {
 		if !router.routes[path] {
 			t.Errorf("expected route %s to be registered", path)
 		}

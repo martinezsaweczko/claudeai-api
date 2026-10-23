@@ -56,7 +56,7 @@ coverage-total:
 clean:
 	rm -rf build
 
-# Local run on loopback with the defaults (public :46564, internal :9000).
+# Local run on loopback with the defaults (127.0.0.1:46564).
 # Needs the `claude` CLI on PATH; export CLAUDE_CODE_OAUTH_TOKEN first (see README).
 run:
 	go run ./cmd

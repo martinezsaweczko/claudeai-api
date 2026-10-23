@@ -33,6 +33,8 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - [x] T7.2 Grafana dashboard rows for Claude runs, tokens/cost, skills; example alert rules; test that every PromQL metric name exists in the real exposition
 - [x] T8 Containerfile with `claude` binary, CI cleanup, README
 
+- [x] T9 SINGLE HTTP SERVER (user decision after running the container: Swagger lived on internal port 9000 but documented /v1 routes served on 46564, so "Try it out" 404ed; the user does NOT want two HTTP servers). Merge the internal server into the public one: one port serves /v1/*, /api/v1/{health,version,skills,skills/refresh,docs/}, /metrics. Remove `-internal-*` flags/server/port, `EXPOSE`/healthcheck/compose/docs references. When API keys are configured: public = health, version, docs; protected (Bearer) = /v1/*, /metrics, skills status and refresh. No keys = everything open (as today). Supersedes the earlier "two Swagger specs" idea.
+
 ## Acceptance
 `go build ./... && go vet ./... && gofmt -l . && go test -race ./...` clean after each task.
 

@@ -30,15 +30,14 @@ The service is **stateless**: the client sends the whole conversation on every r
 ## Architecture
 
 ```
-                         +----------------------------- gateway (one container) -----------------------------+
- OpenAI client           |  public :46564                                                                      |
- (Open WebUI, SDK, curl) |  /v1/models  /v1/chat/completions   --> concurrency limit --> claude -p (per request)|--> Anthropic
-        |  Bearer key    |        |                                  (own process group, isolation flags)      |    (Max login via
+                         +----------------------- gateway (one container, ONE port :46564) -----------------------+
+ OpenAI client           |  /v1/models  /v1/chat/completions   --> concurrency limit --> claude -p (per request)|--> Anthropic
+ (Open WebUI, SDK, curl) |        |                                  (own process group, isolation flags)      |    (Max login via
         +--------------> |  tracing -> metrics -> logging -> API-key auth                                        |     CLAUDE_CODE_OAUTH_TOKEN)
-                         |                                                                                      |
- Prometheus / Grafana    |  internal :9000 (no auth, keep private)                                              |
-        +--------------> |  /api/v1/health  /api/v1/version  /metrics  /api/v1/docs  /api/v1/skills[/refresh]    |
-                         |                                                                                      |
+        Bearer key       |                                                                                      |
+ Prometheus / Grafana    |  /metrics  /api/v1/skills[/refresh]       (same API-key auth when keys are set)       |
+        +--------------> |  /api/v1/health  /api/v1/version  /api/v1/docs/   (always public)                    |
+        Bearer key       |                                                                                      |
  private skills repo     |  skills syncer: git (ssh, read-only deploy key) --> validated, read-only snapshot     |
         <--------------- |  used as the cwd of every claude run (--tools Skill --setting-sources project)        |
                          +--------------------------------------------------------------------------------------+
@@ -59,12 +58,19 @@ o11/               OTel setup, metrics factories, trace-aware slog handler
 grafana/           dashboard + example alert rules
 ```
 
-Two HTTP servers:
+One HTTP server, one port (`-http-port`, default 46564), so the Swagger UI and the API share an origin and "Try it out" works. The write timeout (`-http-write-timeout`) defaults to 0 (disabled) so long SSE streams are not cut. It listens on **127.0.0.1** by default (secure by default for a personal tool); the container image passes `0.0.0.0` explicitly so the published port works.
 
-- **Public** (`-http-port`, default 46564): the API. The write timeout (`-http-write-timeout`) defaults to 0 (disabled) so long SSE streams are not cut.
-- **Internal** (`-internal-port`, default 9000): `GET /api/v1/health`, `GET /api/v1/version`, `GET /api/v1/docs` (Swagger UI), `GET /metrics`, `GET /api/v1/skills`, `POST /api/v1/skills/refresh`. **No authentication**: never expose it publicly.
+| Route | Description | Auth |
+|---|---|---|
+| `GET /v1/models`, `GET /v1/models/{model}`, `POST /v1/chat/completions` | OpenAI-compatible API | protected |
+| `GET /metrics` (`-o11-prometheus-path`) | Prometheus metrics | protected |
+| `GET /api/v1/skills`, `POST /api/v1/skills/refresh` | Skills status and refresh | protected |
+| `GET /api/v1/health`, `GET /api/v1/version` | Probes and build info | public |
+| `GET /api/v1/docs/` (Swagger UI, `doc.json`), `GET /docs` (redirect to the UI) | Swagger for the whole service | public |
 
-Both servers listen on **127.0.0.1** by default (secure by default for a personal tool). The container image passes `0.0.0.0` explicitly so the published port works.
+"Protected" means `Authorization: Bearer <key>` is required **when `CLAUDEAI_API_KEYS` is set**; with no keys configured everything is open. "Public" never needs a key (so container health checks and the Swagger UI keep working).
+
+> **Breaking change.** The second "internal" server is gone: the flags `-internal-address` and `-internal-port` were removed (passing them now aborts startup with `flag provided but not defined`), and `-health-check` now defaults to port 46564 instead of 9000. Health, version, metrics, Swagger and the skills endpoints moved onto the API port; point Prometheus, probes and bookmarks at `46564`.
 
 ## Quickstart A: run locally
 
@@ -79,7 +85,7 @@ Both servers listen on **127.0.0.1** by default (secure by default for a persona
 2. Run the gateway (loopback only, no API keys):
 
    ```bash
-   make run                      # go run ./cmd  (public 127.0.0.1:46564, internal 127.0.0.1:9000)
+   make run                      # go run ./cmd  (127.0.0.1:46564)
    # or: go build -o build/main ./cmd && ./build/main
    ```
 
@@ -136,7 +142,7 @@ podman run -d --name claudeai-api \
   -v $S/known_hosts:/run/secrets/known_hosts:ro \
   -p 127.0.0.1:46564:46564 --env-file .env \
   claudeai-api:latest \
-  -http-address 0.0.0.0 -internal-address 0.0.0.0 -skills-dir /var/lib/claudeai-api/skills \
+  -http-address 0.0.0.0 -skills-dir /var/lib/claudeai-api/skills \
   -skills-repo git@github.com:OWNER/skills-repo.git \
   -skills-ssh-key /run/secrets/skills_deploy_key -skills-known-hosts /run/secrets/known_hosts
 ```
@@ -148,8 +154,8 @@ Notes:
 - **Why `--userns=keep-id:uid=1001,gid=1001`.** ssh refuses a private key that is not owned by the user running it. With this option your host user is uid 1001 inside the container, so a key you own (mode 600) is accepted as is, and the `:ro` mount leaves the original untouched. Verified with rootless podman 5.4. The alternative `:U` volume option chowns the host file, so use it only on a copy.
 - **docker.** There is no `keep-id`: copy the key and `known_hosts` to a directory you control, `chown 1001:1001` them, `chmod 0400` the key, mount them `:ro`, and drop `--userns`. Docker has not been exercised for this project (only podman was), so treat these steps as unverified.
 - **`--read-only`.** The root filesystem is read-only; `/tmp`, `/home/appuser` (the CLI writes its config there) and the state volume are the only writable places. podman creates tmpfs mounts root-owned and has no `uid=` option, hence `mode=1777`; the mounts are private to the container. Drop `--read-only` and the tmpfs flags if you prefer.
-- **Ports.** Only the public port is published, and only on `127.0.0.1`. The container binds `0.0.0.0` and may run without API keys, so publishing it on all interfaces (`-p 46564:46564`) without `CLAUDEAI_API_KEYS` exposes your subscription; the startup warning says so. The internal port (9000) is not published; reach it from other containers on the same network (for example Prometheus scraping `claudeai-api:9000`).
-- **Health check.** The image runs `claudeai-api -health-check` (internal port) every 30s. `podman build` must use `--format docker` to keep the `HEALTHCHECK` instruction (`make container` does).
+- **Ports.** One port (46564), published only on `127.0.0.1`. The container binds `0.0.0.0` and may run without API keys, so publishing it on all interfaces (`-p 46564:46564`) without `CLAUDEAI_API_KEYS` exposes your subscription, `/metrics` and the skills refresh endpoint; the startup warning says so. Other containers on the same network reach it as `claudeai-api:46564` (send the Bearer key when keys are set).
+- **Health check.** The image runs `claudeai-api -health-check` (port 46564) every 30s (health is public and answers on the single port, no key needed). `podman build` must use `--format docker` to keep the `HEALTHCHECK` instruction (`make container` does).
 - **State volume.** `/var/lib/claudeai-api` is a disposable cache (bare clone and materialized skills). It can be a named volume or a tmpfs; losing it only costs one re-clone.
 - **Claude CLI in the image.** Installed from the official release binary (no Node.js), checked against Anthropic's signed manifest: the release signing key must match the pinned fingerprint `31DD DE24 DDFA B679 F42D 7BD2 BAA9 29FF 1A7E CACE`, the detached signature of `manifest.json` must verify against it, and the binary's SHA-256 must match the manifest. Not verified: Linux binaries carry no per-binary code signature. The image sets `DISABLE_UPDATES=1` (the version stays pinned) and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (no telemetry or error reporting), both documented in the Claude Code docs.
 - **Compose.** [`compose.example.yaml`](compose.example.yaml) has the same setup for `podman compose` / `docker compose`, including the scaling notes.
@@ -159,7 +165,7 @@ Notes:
 Two separate layers:
 
 1. **Gateway to Claude: `CLAUDE_CODE_OAUTH_TOKEN`.** Run `claude setup-token` once on a machine where you are logged in with your Max subscription; it prints a token that is valid for **one year**. Pass it to every container as an environment variable. To rotate it, run `claude setup-token` again, update the secret and restart the containers (a running process keeps using the old token). When it expires or is revoked requests fail with `502 upstream_auth_error`. If the variable is unset the CLI falls back to its own stored login (convenient locally; there is none in a container).
-2. **Client to gateway: `CLAUDEAI_API_KEYS` (optional).** Comma-separated keys; when set, `/v1` requires `Authorization: Bearer <key>` and answers failures with `401`, `WWW-Authenticate: Bearer` and an OpenAI-style body (`missing_api_key` / `invalid_api_key`). When unset or empty, authentication is **off**. The internal server is never authenticated.
+2. **Client to gateway: `CLAUDEAI_API_KEYS` (optional).** Comma-separated keys; when set, the protected routes (`/v1/*`, `/metrics`, `/api/v1/skills`, `/api/v1/skills/refresh`) require `Authorization: Bearer <key>` and answer failures with `401`, `WWW-Authenticate: Bearer` and an OpenAI-style body (`missing_api_key` / `invalid_api_key`). Health, version and the Swagger UI stay public. When unset or empty, authentication is **off** for everything.
 
 Secrets are read from environment variables, not flags, because flags are visible in process listings (`ps`, `/proc`). They are never logged: the startup log only says whether they are set and how many keys there are. `ANTHROPIC_API_KEY` must not be set: it overrides the subscription login and would bill the API key; the gateway warns if it is set and strips it (and `ANTHROPIC_AUTH_TOKEN`) from the Claude child processes.
 
@@ -174,17 +180,15 @@ All configuration is flags, except secrets (environment variables). `./build/mai
 
 | Flag | Default | Description |
 |---|---|---|
-| `-http-address` | `127.0.0.1` | Public bind address. `0.0.0.0` listens on every interface (the container image sets it) |
-| `-http-port` | `46564` | Public port |
-| `-http-timeout` | `30` | Idle timeout in seconds (also used by the internal server) |
-| `-http-read-timeout` | `10` | Read timeout in seconds (also used by the internal server) |
-| `-http-write-timeout` | `0` | Public write timeout in seconds; `0` disables it, needed for SSE (the internal server has a fixed 30s) |
-| `-internal-address` | `127.0.0.1` | Internal bind address (unauthenticated server) |
-| `-internal-port` | `9000` | Internal port |
+| `-http-address` | `127.0.0.1` | Bind address. `0.0.0.0` listens on every interface (the container image sets it) |
+| `-http-port` | `46564` | Port of the single server (API, health, metrics, Swagger, skills) |
+| `-http-timeout` | `30` | Idle timeout in seconds |
+| `-http-read-timeout` | `10` | Read timeout in seconds |
+| `-http-write-timeout` | `0` | Write timeout in seconds; `0` disables it, needed for SSE |
 | `-log-level` | `info` | `debug`, `info`, `warn`, `error` |
 | `-log-file-path` | `stdout` | Log destination |
 | `-o11-tracer-endpoint` | empty | OTLP gRPC endpoint without scheme (for example `tempo:4317`) |
-| `-o11-prometheus-path` | `/metrics` | Metrics path on the internal server |
+| `-o11-prometheus-path` | `/metrics` | Metrics path (protected when API keys are set) |
 | `-o11-environment` | `dev` | Environment tag in telemetry |
 | `-claude-bin` | `claude` | Claude Code CLI binary name or path |
 | `-claude-model` | `sonnet` | Default model alias when a request names none |
@@ -209,7 +213,7 @@ The child `claude` processes inherit the gateway environment (minus the two vari
 
 ## API
 
-OpenAI clients use the base URL `http://<host>:<http-port>/v1` (public server). Same auth rules as above. Swagger UI for the whole service is on the internal server at `/api/v1/docs` (generated by [swaggo/swag](https://github.com/swaggo/swag), `make swagger`).
+OpenAI clients use the base URL `http://<host>:<http-port>/v1` (same server and port as everything else). Same auth rules as above. Swagger UI for the whole service is at `/api/v1/docs/` (also `/docs`), on the same origin as the API, so "Try it out" works; click **Authorize** and paste the key when `CLAUDEAI_API_KEYS` is set (generated by [swaggo/swag](https://github.com/swaggo/swag), `make swagger`).
 
 | Endpoint | Description |
 |---|---|
@@ -322,22 +326,31 @@ chmod 600 skills_deploy_key
 
 In a container, mount both files read-only under `/run/secrets/` as shown in [Quickstart B](#quickstart-b-run-in-a-container). Only the key **path** is configured and logged; the key content is never read by the gateway, logged or returned. Host keys are always verified (`StrictHostKeyChecking=yes`). A missing key or known_hosts file stops startup with an error; a transient git failure only logs a warning and the last good snapshot stays in use.
 
-### Refresh and status (internal server)
+### Refresh and status
 
 The syncer re-syncs every `-skills-refresh` (default 5m, jittered, with backoff after failures). The startup does one bounded initial sync (at most 20s) before the servers accept traffic.
 
 ```bash
-curl http://127.0.0.1:9000/api/v1/skills                    # enabled, commit, skills, skipped, sync health
-curl -X POST http://127.0.0.1:9000/api/v1/skills/refresh   # 202 {"status":"triggered"}; 404 skills_disabled when off
+curl http://127.0.0.1:46564/api/v1/skills                    # enabled, commit, skills, skipped, sync health
+curl -X POST http://127.0.0.1:46564/api/v1/skills/refresh   # 202 {"status":"triggered"}; 404 skills_disabled when off
+# with CLAUDEAI_API_KEYS set, add: -H "Authorization: Bearer <key>"
 ```
 
-`POST .../refresh` is non-blocking and coalesced; poll `GET .../skills` for the new commit (for example from a repository webhook relay). Both endpoints are **unauthenticated, like health and metrics**: the internal port must never be exposed publicly. When skills are disabled `GET` answers `{"enabled":false}`.
+`POST .../refresh` is non-blocking and coalesced; poll `GET .../skills` for the new commit (for example from a repository webhook relay). Both endpoints share the API port and are **protected like `/v1`**: they require the Bearer key when `CLAUDEAI_API_KEYS` is set, and are open (so keep the port on loopback) when it is not. When skills are disabled `GET` answers `{"enabled":false}`.
 
 ## Observability
 
 - **Traces**: OTLP gRPC (`-o11-tracer-endpoint tempo:4317`), see [Traces](#traces).
 - **Logs**: slog logs with `trace_id` / `span_id` injected from the request or run context (also `Skills refresh requested`, sync and run logs). Prompts, message content and key paths are never logged.
-- **Metrics**: Prometheus on the internal server (`-o11-prometheus-path`, default `/metrics`), see below.
+- **Metrics**: Prometheus on the single port (`-o11-prometheus-path`, default `/metrics`; requires the Bearer key when `CLAUDEAI_API_KEYS` is set), see below. Scrape example:
+
+  ```yaml
+  scrape_configs:
+    - job_name: claudeai-api
+      metrics_path: /metrics
+      static_configs: [{targets: ['claudeai-api:46564']}]
+      authorization: { type: Bearer, credentials: <one of CLAUDEAI_API_KEYS> }   # omit when no keys are set
+  ```
 - **Dashboard and alerts**: [`grafana/`](grafana/README.md) has a Grafana dashboard (Claude runs, tokens and cost, skills, HTTP, system) and example Prometheus alert rules (`grafana/alerts.example.yml`). `go test ./grafana/` fails if the dashboard or the alerts reference a metric or label that the app does not expose.
 
 ### Metrics
@@ -382,9 +395,9 @@ The gateway builds each child's environment from its own (`os.Environ`, minus `A
 
 - **Scaling to N containers.** Run as many replicas as you like behind any load balancer: there is no session, memory or shared state, and every container needs only the same `CLAUDE_CODE_OAUTH_TOKEN` (and, optionally, the same API keys and skills repo). Each replica syncs skills on its own. See `compose.example.yaml`.
 - **Concurrency.** `-claude-max-concurrency` (default 4) limits simultaneous `claude` processes **per container**; extra requests get `429 server_busy` with `Retry-After: 1` (raise the limit, or put a queue or retry in the client). Total parallelism is replicas times the limit. All containers draw on the **same Max usage limits**, so more replicas do not add capacity at Anthropic; hitting the limit shows up as `429 rate_limit_exceeded`. Budget roughly 300-500 MB of RAM per running process.
-- **Timeouts.** `-claude-timeout` (default 5m) bounds a whole request (504 `upstream_timeout`; the CLI process group is killed). `-http-read-timeout` (10s) covers reading the request; the public write timeout is off so streams are not cut.
+- **Timeouts.** `-claude-timeout` (default 5m) bounds a whole request (504 `upstream_timeout`; the CLI process group is killed). `-http-read-timeout` (10s) covers reading the request; the write timeout is off so streams are not cut.
 - **Shutdown.** On SIGINT/SIGTERM both servers stop gracefully (30s), the skills syncer is cancelled, running CLI processes are bounded by their request context and the backend's temp directories are removed. Give the orchestrator a stop grace period of at least 30s.
-- **Health.** `GET /api/v1/health` on the internal port; `claudeai-api -health-check [port]` (used by the image `HEALTHCHECK`; port defaults to 9000) exits 0 when it answers 200. Health does not call Claude, so it cannot detect an expired token: alert on `claude_runs_total{outcome="auth"}` instead (see `grafana/alerts.example.yml`).
+- **Health.** `GET /api/v1/health` on the API port (public, no key); `claudeai-api -health-check [port]` (used by the image `HEALTHCHECK`; port defaults to 46564, connects over loopback) exits 0 when it answers 200. Health does not call Claude, so it cannot detect an expired token: alert on `claude_runs_total{outcome="auth"}` instead (see `grafana/alerts.example.yml`).
 - **Token rotation.** Every year (or when revoked): `claude setup-token`, update the secret, restart the containers one by one.
 
 ## Troubleshooting
@@ -396,7 +409,7 @@ The gateway builds each child's environment from its own (`os.Environ`, minus `A
 | `429 rate_limit_exceeded` | Your Max usage limit is reached (shared with Claude Code and every other container using the login). Wait for the window to reset |
 | `504 upstream_timeout` | The request exceeded `-claude-timeout`; raise it for very long generations |
 | `404 model_not_found` | The model name is unknown to the CLI; use `sonnet`, `opus`, `haiku` or a full model id |
-| Skills not loading | `curl http://127.0.0.1:9000/api/v1/skills` (inside the container network): check `enabled`, `commit`, `skipped` reasons and the sync error in the logs. Typical causes: deploy key not readable by uid 1001 or not mode 0600/0400 (see `--userns=keep-id` above), `known_hosts` missing the git host, wrong `-skills-ref`, skill `name` not equal to its directory |
+| Skills not loading | `curl -H "Authorization: Bearer <key>" http://127.0.0.1:46564/api/v1/skills` (omit the header when no keys are set): check `enabled`, `commit`, `skipped` reasons and the sync error in the logs. Typical causes: deploy key not readable by uid 1001 or not mode 0600/0400 (see `--userns=keep-id` above), `known_hosts` missing the git host, wrong `-skills-ref`, skill `name` not equal to its directory |
 | Startup error about the skills key or `known_hosts` | The path passed to `-skills-ssh-key` / `-skills-known-hosts` does not exist inside the container; check the `:ro` mounts |
 | `mkdir ... permission denied` for the skills dir | The state directory is not writable by uid 1001: use a named volume, or a tmpfs with `mode=1777` |
 | Streaming stalls or arrives in one burst behind a proxy | Disable proxy buffering and raise the read timeout (nginx: `proxy_buffering off; proxy_read_timeout 300s;`); there is no heartbeat |
@@ -413,8 +426,8 @@ The gateway builds each child's environment from its own (`os.Environ`, minus `A
 ## Security notes
 
 - **Secrets** are environment variables only (never flags, never logged). Keep `.env` mode 600 and out of git; prefer your orchestrator's secret store.
-- **Bind addresses** default to loopback. The container binds `0.0.0.0`; publish the public port on `127.0.0.1` or behind a TLS reverse proxy with `CLAUDEAI_API_KEYS` set.
-- **Internal port** (health, version, metrics, Swagger, skills status/refresh) has **no authentication** and must stay on a private network. Do not publish it.
+- **Bind addresses** default to loopback. The container binds `0.0.0.0`; publish the port on `127.0.0.1` or behind a TLS reverse proxy with `CLAUDEAI_API_KEYS` set.
+- **One port for everything.** `/metrics` and `POST /api/v1/skills/refresh` share the API port. Without `CLAUDEAI_API_KEYS` they are open to anyone who can reach the port, so publish it on `127.0.0.1` only; with keys set they require the Bearer key. Only health, version and the Swagger UI are always public (the UI itself needs a key only to call protected operations).
 - **Claude isolation.** Each run is a fresh `claude -p` with `--setting-sources`, `--strict-mcp-config`, `--no-chrome` and no tools (`--tools ""`, or only `Skill` when skills are active), `ANTHROPIC_API_KEY` stripped, in its own process group killed on timeout.
 - **Deploy key** is read-only and scoped to the one skills repository; a leaked key allows reading that repository only. Mount it `:ro`.
 - **Skills trust model.** The skills repository is trusted input: its skill text is given to the model, so a compromised repository can inject prompts. The model only has the Skill tool (no shell, files or network tools), which bounds what an injected prompt can do, but it can shape answers. Review skill changes like code. The syncer never executes repository content (bare clone, `ls-tree`/`cat-file`, no checkout, hooks or symlinks).

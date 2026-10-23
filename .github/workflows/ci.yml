@@ -94,6 +94,22 @@ jobs:
             docker run --rm --entrypoint sh claudeai-api:ci -c "$cmd"
           done
 
+      # Health is public and lives on the single port (46564), the default of
+      # -health-check; no Claude credentials are needed.
+      - name: Smoke-test container health
+        run: |
+          docker run -d --name ci-gateway claudeai-api:ci
+          for i in $(seq 1 20); do
+            if docker exec ci-gateway /usr/local/bin/claudeai-api -health-check; then
+              docker rm -f ci-gateway
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs ci-gateway
+          docker rm -f ci-gateway
+          exit 1
+
   # Publishes the shields.io endpoint file behind the README coverage badge.
   # The orphan `badges` branch holds a single commit with coverage.json only.
   coverage-badge:

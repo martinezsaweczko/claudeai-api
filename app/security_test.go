@@ -51,7 +51,7 @@ func TestLogClaudeStartup(t *testing.T) {
 		{
 			name:    "auth disabled on a public address warns",
 			address: "0.0.0.0",
-			want:    []string{"api_key_auth=disabled", "api_keys=0", "oauth_token_set=false", "level=WARN", "unauthenticated"},
+			want:    []string{"api_key_auth=disabled", "api_keys=0", "oauth_token_set=false", "level=WARN", "unauthenticated", "single port"},
 		},
 		{
 			name:      "auth disabled on loopback does not warn",

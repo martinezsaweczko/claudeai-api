@@ -18,9 +18,9 @@ type SkillsHandlerConfig struct {
 	BasePath string // e.g. "/api/v1"
 }
 
-// SkillsHandler serves the internal skills status and refresh endpoints. They
-// are unauthenticated like health and metrics: the internal port must never be
-// exposed publicly.
+// SkillsHandler serves the skills status and refresh endpoints. They share the
+// single HTTP port with the API; the caller wires them behind the API-key
+// middleware, so they require the key whenever CLAUDEAI_API_KEYS is set.
 type SkillsHandler struct {
 	log      *slog.Logger
 	source   SkillsSource
@@ -105,10 +105,12 @@ func timePtr(t time.Time) *time.Time {
 // Get skills
 //
 //	@Summary      Skills status
-//	@Description  Lists the skills of the current snapshot and the health of the sync. Returns `{"enabled":false}` when no skills repository is configured. Internal port only: unauthenticated.
+//	@Description  Lists the skills of the current snapshot and the health of the sync. Returns `{"enabled":false}` when no skills repository is configured. Requires the API key when CLAUDEAI_API_KEYS is set.
 //	@Tags         Skills
+//	@Security     BearerAuth
 //	@Produce      json
 //	@Success      200  {object}  skillsResponse
+//	@Failure      401  {object}  openAIErrorDoc
 //	@Router       /api/v1/skills [get]
 func (h *SkillsHandler) getSkills(w http.ResponseWriter, _ *http.Request) {
 	if h.source == nil {
@@ -145,10 +147,12 @@ func (h *SkillsHandler) getSkills(w http.ResponseWriter, _ *http.Request) {
 // Refresh skills
 //
 //	@Summary      Trigger a skills sync
-//	@Description  Asks the background syncer to sync now (non-blocking, coalesced) and returns 202. Poll `GET /api/v1/skills` for the result. 404 `skills_disabled` when no skills repository is configured. Internal port only: unauthenticated.
+//	@Description  Asks the background syncer to sync now (non-blocking, coalesced) and returns 202. Poll `GET /api/v1/skills` for the result. 404 `skills_disabled` when no skills repository is configured. Requires the API key when CLAUDEAI_API_KEYS is set.
 //	@Tags         Skills
+//	@Security     BearerAuth
 //	@Produce      json
 //	@Success      202  {object}  skillsRefreshResponse
+//	@Failure      401  {object}  openAIErrorDoc
 //	@Failure      404  {object}  errorResponse
 //	@Router       /api/v1/skills/refresh [post]
 func (h *SkillsHandler) refresh(w http.ResponseWriter, r *http.Request) {

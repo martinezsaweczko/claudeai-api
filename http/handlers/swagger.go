@@ -21,7 +21,8 @@ func NewSwaggerHandler(_ *slog.Logger, basePath string) *SwaggerHandler {
 	return &SwaggerHandler{basePath: basePath}
 }
 
-// RegisterRoutes registers GET {basePath}/docs and GET {basePath}/docs/*.
+// RegisterRoutes registers GET {basePath}/docs and GET {basePath}/docs/*, plus
+// the convenience redirects /docs and /docs/ to the Swagger UI.
 func (h *SwaggerHandler) RegisterRoutes(router Router, middlewares ...middleware.Middleware) {
 	path := h.basePath + "/docs"
 	swaggerHandler := httpSwagger.Handler(
@@ -38,4 +39,12 @@ func (h *SwaggerHandler) RegisterRoutes(router Router, middlewares ...middleware
 
 	register(path, http.RedirectHandler(path+"/", http.StatusMovedPermanently))
 	register(path+"/", swaggerHandler)
+
+	// Convenience entry point: /docs -> the UI (skipped when basePath is empty,
+	// where /docs is already the UI itself).
+	if h.basePath != "" {
+		ui := http.RedirectHandler(path+"/index.html", http.StatusFound)
+		register("/docs", ui)
+		register("/docs/", ui)
+	}
 }

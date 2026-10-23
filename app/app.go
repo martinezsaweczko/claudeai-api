@@ -29,17 +29,16 @@ type Server interface {
 }
 
 type App struct {
-	ctx            context.Context
-	config         *config.Config
-	publicServer   Server
-	internalServer Server
-	log            *slog.Logger
-	observability  *o11.ObservabilityInst
-	buildInfo      model.BuildInfo
-	basePath       string
-	lookupEnv      func(string) (string, bool)
+	ctx           context.Context
+	config        *config.Config
+	server        Server // the single HTTP server: API, health, metrics, Swagger, skills
+	log           *slog.Logger
+	observability *o11.ObservabilityInst
+	buildInfo     model.BuildInfo
+	basePath      string
+	lookupEnv     func(string) (string, bool)
 
-	// apiKeyAuth guards the /v1 routes. It is a
+	// apiKeyAuth guards /v1, /metrics and the skills endpoints. It is a
 	// pass-through when no API keys are configured.
 	apiKeyAuth middleware.Middleware
 
@@ -61,13 +60,9 @@ func NewApp(cfg *config.Config) *App {
 	}
 }
 
-func (app *App) WithPublicServer(server Server) *App {
-	app.publicServer = server
-	return app
-}
-
-func (app *App) WithInternalServer(server Server) *App {
-	app.internalServer = server
+// WithServer sets the single HTTP server and returns the app instance for chaining.
+func (app *App) WithServer(server Server) *App {
+	app.server = server
 	return app
 }
 
@@ -96,8 +91,8 @@ func (app *App) WithBasePath(basePath string) *App {
 
 func (app *App) Run() error {
 	// Validate required dependencies
-	if app.publicServer == nil || app.internalServer == nil {
-		return fmt.Errorf("server dependencies are required: use WithPublicServer() and WithInternalServer()")
+	if app.server == nil {
+		return fmt.Errorf("server dependency is required: use WithServer()")
 	}
 	if app.log == nil {
 		return fmt.Errorf("logger dependency is required: use WithLog()")
@@ -112,17 +107,13 @@ func (app *App) Run() error {
 	// them, then the background loop. Never blocks startup for long.
 	app.startSkills()
 
-	// Start HTTP servers
-	if err := app.publicServer.Start(); err != nil {
-		return fmt.Errorf("failed to start public server: %w", err)
-	}
-	if err := app.internalServer.Start(); err != nil {
-		return fmt.Errorf("failed to start internal server: %w", err)
+	// Start the HTTP server
+	if err := app.server.Start(); err != nil {
+		return fmt.Errorf("failed to start server: %w", err)
 	}
 
 	app.log.Info("Application started",
-		"public_port", app.config.HttpServer.Port,
-		"internal_port", app.config.InternalServer.Port,
+		"port", app.config.HttpServer.Port,
 		"version", app.buildInfo.Version)
 
 	// Setup signal handling for graceful shutdown
@@ -136,7 +127,7 @@ func (app *App) Run() error {
 	return app.shutdown()
 }
 
-// shutdown gracefully stops both HTTP servers
+// shutdown gracefully stops the HTTP server
 func (app *App) shutdown() error {
 	shutdownCtx, cancel := context.WithTimeout(app.ctx, 30*time.Second)
 	defer cancel()
@@ -144,12 +135,8 @@ func (app *App) shutdown() error {
 	app.log.Info("Starting graceful shutdown")
 
 	var shutdownErr error
-	if err := app.publicServer.Stop(shutdownCtx); err != nil {
-		app.log.Error("Error during public server shutdown", "error", err)
-		shutdownErr = err
-	}
-	if err := app.internalServer.Stop(shutdownCtx); err != nil {
-		app.log.Error("Error during internal server shutdown", "error", err)
+	if err := app.server.Stop(shutdownCtx); err != nil {
+		app.log.Error("Error during server shutdown", "error", err)
 		shutdownErr = err
 	}
 

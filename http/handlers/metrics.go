@@ -42,8 +42,10 @@ func (m *MetricsHandlerConfig) NewMetricsHandler() *MetricsHandler {
 //	@Summary      Prometheus metrics
 //	@Description  Exposes Prometheus-compatible metrics.
 //	@Tags         System
+//	@Security     BearerAuth
 //	@Produce      plain
 //	@Success      200 {string} string "Prometheus metrics text"
+//	@Failure      401 {object} openAIErrorDoc "Missing or invalid API key (only when CLAUDEAI_API_KEYS is set)"
 //	@Router       /metrics [get]
 func swaggerMetricsDocs() {}
 

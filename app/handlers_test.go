@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -47,26 +48,28 @@ func (b *stubBackend) Complete(context.Context, claude.Request) (claude.Result, 
 	return claude.Result{Text: "OK", Model: "m"}, nil
 }
 
-func wiredServers(t *testing.T, keys []string) (public, internal *muxServer, be *stubBackend) {
+// wiredServer wires the whole app on ONE mux, like production.
+func wiredServer(t *testing.T, keys []string) (*muxServer, *stubBackend) {
 	t.Helper()
-	be = &stubBackend{}
-	public, internal = wiredServersWith(t, keys, be)
-	return public, internal, be
+	be := &stubBackend{}
+	return wiredServerWith(t, keys, be), be
 }
 
-// wiredServersWith wires the app around the given Claude backend.
-func wiredServersWith(t *testing.T, keys []string, backend claude.Backend) (public, internal *muxServer) {
+// wiredServerWith wires the app around the given Claude backend.
+func wiredServerWith(t *testing.T, keys []string, backend claude.Backend) *muxServer {
 	t.Helper()
 	tp := sdktrace.NewTracerProvider()
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
-	cfg := &config.Config{Claude: config.ClaudeConfig{
-		Bin: "claude", Model: "sonnet", Models: []string{"sonnet", "opus"},
-		Timeout: time.Minute, MaxConcurrency: 1, APIKeys: keys,
-	}}
-	public, internal = newMuxServer(), newMuxServer()
+	cfg := &config.Config{
+		Claude: config.ClaudeConfig{
+			Bin: "claude", Model: "sonnet", Models: []string{"sonnet", "opus"},
+			Timeout: time.Minute, MaxConcurrency: 1, APIKeys: keys,
+		},
+		O11: config.O11Config{PrometheusPath: "/metrics"},
+	}
+	srv := newMuxServer()
 	a := NewApp(cfg).
-		WithPublicServer(public).
-		WithInternalServer(internal).
+		WithServer(srv).
 		WithLog(slog.New(slog.NewTextHandler(io.Discard, nil))).
 		WithObservability(&o11.ObservabilityInst{Trace: tp, MeterProvider: noop.NewMeterProvider()}).
 		WithBuildInfo(model.BuildInfo{Version: "test"}).
@@ -76,7 +79,7 @@ func wiredServersWith(t *testing.T, keys []string, backend claude.Backend) (publ
 	if err := a.initAndWire(); err != nil {
 		t.Fatalf("initAndWire: %v", err)
 	}
-	return public, internal
+	return srv
 }
 
 func do(s *muxServer, method, path, auth, body string) *httptest.ResponseRecorder {
@@ -93,7 +96,7 @@ const chatBody = `{"model":"haiku","messages":[{"role":"user","content":"hi"}]}`
 
 func TestV1RoutesAndAPIKeyAuth(t *testing.T) {
 	t.Run("keys configured", func(t *testing.T) {
-		public, _, be := wiredServers(t, []string{"secret"})
+		srv, be := wiredServer(t, []string{"secret"})
 		tests := []struct {
 			name, method, path, auth, body string
 			want                           int
@@ -107,7 +110,7 @@ func TestV1RoutesAndAPIKeyAuth(t *testing.T) {
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				if rec := do(public, tc.method, tc.path, tc.auth, tc.body); rec.Code != tc.want {
+				if rec := do(srv, tc.method, tc.path, tc.auth, tc.body); rec.Code != tc.want {
 					t.Errorf("status = %d, want %d, body %s", rec.Code, tc.want, rec.Body.String())
 				}
 			})
@@ -118,27 +121,12 @@ func TestV1RoutesAndAPIKeyAuth(t *testing.T) {
 	})
 
 	t.Run("no keys configured", func(t *testing.T) {
-		public, _, _ := wiredServers(t, nil)
-		if rec := do(public, "GET", "/v1/models", "", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"opus"`) {
+		srv, _ := wiredServer(t, nil)
+		if rec := do(srv, "GET", "/v1/models", "", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"opus"`) {
 			t.Errorf("models = %d %s", rec.Code, rec.Body.String())
 		}
-		if rec := do(public, "POST", "/v1/chat/completions", "", chatBody); rec.Code != 200 {
+		if rec := do(srv, "POST", "/v1/chat/completions", "", chatBody); rec.Code != 200 {
 			t.Errorf("chat = %d %s", rec.Code, rec.Body.String())
-		}
-	})
-
-	t.Run("internal endpoints are not behind the key and v1 is public-only", func(t *testing.T) {
-		public, internal, _ := wiredServers(t, []string{"secret"})
-		for _, p := range []string{"/api/v1/health", "/api/v1/version"} {
-			if rec := do(internal, "GET", p, "", ""); rec.Code != 200 {
-				t.Errorf("internal %s = %d, want 200", p, rec.Code)
-			}
-		}
-		if rec := do(internal, "GET", "/v1/models", "", ""); rec.Code != 404 {
-			t.Errorf("/v1/models on the internal server = %d, want 404", rec.Code)
-		}
-		if rec := do(public, "GET", "/api/v1/health", "", ""); rec.Code != 404 {
-			t.Errorf("health on the public server = %d, want 404", rec.Code)
 		}
 	})
 }
@@ -149,8 +137,7 @@ func TestInitAndWireRequiresObservability(t *testing.T) {
 		Timeout: time.Minute, MaxConcurrency: 1,
 	}}
 	a := NewApp(cfg).
-		WithPublicServer(newMuxServer()).
-		WithInternalServer(newMuxServer()).
+		WithServer(newMuxServer()).
 		WithLog(slog.New(slog.NewTextHandler(io.Discard, nil))).
 		WithBuildInfo(model.BuildInfo{Version: "test"}).
 		WithBasePath("/api/v1")
@@ -159,5 +146,119 @@ func TestInitAndWireRequiresObservability(t *testing.T) {
 
 	if err := a.initAndWire(); err == nil {
 		t.Fatal("initAndWire without observability: want an error, got nil")
+	}
+}
+
+// authMatrixCase is one row of the single-port auth matrix.
+type authMatrixCase struct {
+	method, path string
+	protected    bool
+	okStatus     int // expected status with the right key (or without keys)
+}
+
+func authMatrix() []authMatrixCase {
+	return []authMatrixCase{
+		{"GET", "/v1/models", true, 200},
+		{"GET", "/v1/models/opus", true, 200},
+		{"POST", "/v1/chat/completions", true, 200},
+		{"GET", "/metrics", true, 200},
+		{"GET", "/api/v1/skills", true, 200},
+		{"POST", "/api/v1/skills/refresh", true, 404}, // skills disabled in this wiring
+		{"GET", "/api/v1/health", false, 200},
+		{"GET", "/api/v1/version", false, 200},
+		{"GET", "/api/v1/docs/index.html", false, 200},
+		{"GET", "/api/v1/docs/doc.json", false, 200},
+		{"GET", "/docs", false, 302},
+		{"GET", "/docs/", false, 302},
+	}
+}
+
+func TestSinglePortAuthMatrix(t *testing.T) {
+	body := func(c authMatrixCase) string {
+		if c.path == "/v1/chat/completions" {
+			return chatBody
+		}
+		return ""
+	}
+
+	t.Run("keys configured", func(t *testing.T) {
+		srv, _ := wiredServer(t, []string{"secret", "other"})
+		for _, c := range authMatrix() {
+			t.Run(c.method+" "+c.path, func(t *testing.T) {
+				if c.protected {
+					for _, auth := range []string{"", "Bearer nope", "Basic secret", "secret"} {
+						if rec := do(srv, c.method, c.path, auth, body(c)); rec.Code != 401 {
+							t.Errorf("auth %q = %d, want 401", auth, rec.Code)
+						}
+					}
+					rec := do(srv, c.method, c.path, "", body(c))
+					if rec.Header().Get("WWW-Authenticate") != "Bearer" {
+						t.Errorf("missing WWW-Authenticate challenge")
+					}
+					for _, key := range []string{"secret", "other"} {
+						if rec := do(srv, c.method, c.path, "Bearer "+key, body(c)); rec.Code != c.okStatus {
+							t.Errorf("right key = %d, want %d: %s", rec.Code, c.okStatus, rec.Body.String())
+						}
+					}
+					return
+				}
+				if rec := do(srv, c.method, c.path, "", body(c)); rec.Code != c.okStatus {
+					t.Errorf("public endpoint without key = %d, want %d", rec.Code, c.okStatus)
+				}
+			})
+		}
+	})
+
+	t.Run("no keys configured", func(t *testing.T) {
+		srv, _ := wiredServer(t, nil)
+		for _, c := range authMatrix() {
+			if rec := do(srv, c.method, c.path, "", body(c)); rec.Code != c.okStatus {
+				t.Errorf("%s %s without keys = %d, want %d", c.method, c.path, rec.Code, c.okStatus)
+			}
+		}
+	})
+
+	t.Run("redirect targets the Swagger UI", func(t *testing.T) {
+		srv, _ := wiredServer(t, []string{"secret"})
+		rec := do(srv, "GET", "/docs", "", "")
+		if loc := rec.Header().Get("Location"); loc != "/api/v1/docs/index.html" {
+			t.Errorf("Location = %q", loc)
+		}
+	})
+}
+
+func TestMergedSpecDescribesEverything(t *testing.T) {
+	srv, _ := wiredServer(t, nil)
+	rec := do(srv, "GET", "/api/v1/docs/doc.json", "", "")
+	spec := rec.Body.String()
+	for _, want := range []string{`"/v1/chat/completions"`, `"/v1/models"`, `"/api/v1/skills"`, `"/api/v1/skills/refresh"`, `"/api/v1/health"`, `"/metrics"`, `"BearerAuth"`} {
+		if !strings.Contains(spec, want) {
+			t.Errorf("spec lacks %s", want)
+		}
+	}
+	if strings.Contains(spec, `"host": "localhost`) || strings.Contains(spec, `"host": "127`) {
+		t.Error("spec pins a host: Swagger would call another origin")
+	}
+
+	// Every protected operation advertises BearerAuth so the Authorize button works.
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Security []map[string][]string `json:"security"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("doc.json: %v", err)
+	}
+	for _, c := range authMatrix() {
+		op := doc.Paths[strings.TrimSuffix(c.path, "/")][strings.ToLower(c.method)]
+		if c.path == "/v1/models/opus" {
+			op = doc.Paths["/v1/models/{model}"]["get"]
+		}
+		if !c.protected {
+			continue
+		}
+		if len(op.Security) == 0 || op.Security[0]["BearerAuth"] == nil {
+			t.Errorf("%s %s lacks @Security BearerAuth in the spec", c.method, c.path)
+		}
 	}
 }

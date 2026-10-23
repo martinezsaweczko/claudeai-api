@@ -68,8 +68,7 @@ func newTestApp(t *testing.T, cfg *config.Config) *App {
 	tp := sdktrace.NewTracerProvider()
 	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
 	a := NewApp(cfg).
-		WithPublicServer(newMuxServer()).
-		WithInternalServer(newMuxServer()).
+		WithServer(newMuxServer()).
 		WithLog(slog.New(slog.NewTextHandler(io.Discard, nil))).
 		WithObservability(&o11.ObservabilityInst{Trace: tp, MeterProvider: noop.NewMeterProvider()}).
 		WithBuildInfo(model.BuildInfo{Version: "test"}).
@@ -124,15 +123,12 @@ func TestSkillsDisabledByDefault(t *testing.T) {
 	if a.skills != nil {
 		t.Fatal("skills syncer must not exist when -skills-repo is empty")
 	}
-	internal := a.internalServer.(*muxServer)
-	if rec := do(internal, "GET", "/api/v1/skills", "", ""); rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"enabled":false}` {
+	srv := a.server.(*muxServer)
+	if rec := do(srv, "GET", "/api/v1/skills", "", ""); rec.Code != 200 || strings.TrimSpace(rec.Body.String()) != `{"enabled":false}` {
 		t.Errorf("GET = %d %s", rec.Code, rec.Body.String())
 	}
-	if rec := do(internal, "POST", "/api/v1/skills/refresh", "", ""); rec.Code != 404 {
+	if rec := do(srv, "POST", "/api/v1/skills/refresh", "", ""); rec.Code != 404 {
 		t.Errorf("POST refresh = %d, want 404", rec.Code)
-	}
-	if rec := do(a.publicServer.(*muxServer), "GET", "/api/v1/skills", "", ""); rec.Code != 404 {
-		t.Errorf("skills on the public server = %d, want 404", rec.Code)
 	}
 }
 
@@ -287,17 +283,17 @@ func TestRealSyncerLifecycleAndRefresh(t *testing.T) {
 		t.Fatalf("provider = %q, %v", dir, ok)
 	}
 
-	// Pick up a new commit through the internal refresh endpoint.
+	// Pick up a new commit through the refresh endpoint.
 	addSkill("beta")
-	internal := a.internalServer.(*muxServer)
-	if rec := do(internal, "POST", "/api/v1/skills/refresh", "", ""); rec.Code != 202 {
+	srv := a.server.(*muxServer)
+	if rec := do(srv, "POST", "/api/v1/skills/refresh", "", ""); rec.Code != 202 {
 		t.Fatalf("refresh = %d %s", rec.Code, rec.Body.String())
 	}
 	waitFor(t, "second skill", func() bool {
 		s, _ := a.skills.Current()
 		return len(s.Skills) == 2
 	})
-	rec := do(internal, "GET", "/api/v1/skills", "", "")
+	rec := do(srv, "GET", "/api/v1/skills", "", "")
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"beta"`) || !strings.Contains(rec.Body.String(), `"alpha"`) {
 		t.Fatalf("GET skills = %d %s", rec.Code, rec.Body.String())
 	}

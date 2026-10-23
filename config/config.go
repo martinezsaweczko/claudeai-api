@@ -9,17 +9,12 @@ import (
 )
 
 type Config struct {
-	HttpServer     ServerConfig // Public API server
-	InternalServer ServerConfig // Internal server (health, version, metrics, swagger)
-	Log            LogConfig
-	O11            O11Config
-	Claude         ClaudeConfig // Claude CLI backend and optional API-key auth
-	Skills         SkillsConfig // Optional skills repository synced for the Claude CLI
+	HttpServer ServerConfig // The single HTTP server (API, health, metrics, Swagger, skills)
+	Log        LogConfig
+	O11        O11Config
+	Claude     ClaudeConfig // Claude CLI backend and optional API-key auth
+	Skills     SkillsConfig // Optional skills repository synced for the Claude CLI
 }
-
-// internalWriteTimeoutSeconds is the fixed write timeout of the internal server,
-// which only serves short responses. Only the public server may stream.
-const internalWriteTimeoutSeconds = 30
 
 type ConfigError struct {
 	Message        string
@@ -53,16 +48,12 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 	config := &Config{}
 	listErrors := []error{}
 
-	// Define command-line flags for HTTP server configuration (public API server)
+	// Define command-line flags for HTTP server configuration (single server)
 	var serverAddress string
 	var serverPort int
 	var serverTimeout int
 	var serverReadTimeout int
 	var serverWriteTimeout int
-
-	// Define command-line flags for internal HTTP server configuration
-	var internalAddress string
-	var internalPort int
 
 	// Define command-line flags for LOG configuration
 	var logLevel string
@@ -85,15 +76,11 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 	var skillsRefresh, skillsSyncTimeout time.Duration
 
 	// Flags public API server
-	flag.StringVar(&serverAddress, "http-address", "127.0.0.1", "Public API server bind address (0.0.0.0 listens on every interface; the container image passes it explicitly)")
-	flag.IntVar(&serverPort, "http-port", 46564, "Public API server port")
+	flag.StringVar(&serverAddress, "http-address", "127.0.0.1", "HTTP server bind address (0.0.0.0 listens on every interface; the container image passes it explicitly)")
+	flag.IntVar(&serverPort, "http-port", 46564, "HTTP server port (API, health, metrics, Swagger, skills)")
 	flag.IntVar(&serverTimeout, "http-timeout", 30, "HTTP server timeout in seconds")
 	flag.IntVar(&serverReadTimeout, "http-read-timeout", 10, "HTTP server read timeout in seconds")
-	flag.IntVar(&serverWriteTimeout, "http-write-timeout", 0, "Public server write timeout in seconds (0 disables it, required for long-lived SSE streaming responses)")
-
-	// Flags internal server
-	flag.StringVar(&internalAddress, "internal-address", "127.0.0.1", "Internal API server bind address (unauthenticated: health, metrics, skills; keep it private)")
-	flag.IntVar(&internalPort, "internal-port", 9000, "Internal API server port")
+	flag.IntVar(&serverWriteTimeout, "http-write-timeout", 0, "Server write timeout in seconds (0 disables it, required for long-lived SSE streaming responses)")
 
 	// Flags log
 	flag.StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
@@ -129,18 +116,6 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 	config.HttpServer.WriteTimeout = serverWriteTimeout
 
 	if err := config.HttpServer.validate(); err != nil {
-		listErrors = append(listErrors, err)
-	}
-
-	config.InternalServer = ServerConfig{
-		Address:      internalAddress,
-		Port:         internalPort,
-		Timeout:      serverTimeout,
-		ReadTimeout:  serverReadTimeout,
-		WriteTimeout: internalWriteTimeoutSeconds,
-	}
-
-	if err := config.InternalServer.validate(); err != nil {
 		listErrors = append(listErrors, err)
 	}
 
