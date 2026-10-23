@@ -1,0 +1,174 @@
+# WhatsApp Bot Project - Copilot Instructions
+
+## Project Overview
+This is a WhatsApp Bot application written in Go 1.26.1+. The bot uses the go-api-template library (go.mau.fi/whatsmeow) for WhatsApp integration, SQLite for data persistence, and exposes an HTTP server for receiving webhooks and managing interactions.
+
+**Module**: `github.com/martinezsaweczko/go-api-template`
+
+## Project Structure
+
+```
+cmd/main.go              - Entry point of the application
+app/app.go               - Core application logic
+config/                  - Configuration management
+  ├── config.go          - Configuration loading and parsing
+  ├── log.go             - Logging setup
+  └── server.go          - HTTP server configuration
+http_server/             - HTTP server implementation
+  └── http_server.go     - Webhook handlers and API endpoints
+build/main               - Compiled binary output
+```
+
+## Key Technologies
+- **Language**: Go 1.26.1
+- **WhatsApp Integration**: go.mau.fi/whatsmeow
+- **Database**: SQLite (github.com/mattn/go-sqlite3)
+- **Logging**: slog (built-in)
+- **QR Terminal**: github.com/mdp/qrterminal/v3
+
+## Development Guidelines
+
+### Go Idiomatic Coding Style
+**Always follow Go idioms and conventions:**
+
+#### Filenames
+- Use lowercase, snake_case for filenames: `http_server.go`, `config.go`
+- Group related functionality with clear naming: `config.go`, `log.go`, `server.go`
+- Never use camelCase or PascalCase in filenames
+
+#### Variables & Constants
+- Use camelCase for variable names: `clientID`, `messageText`, `isActive`
+- Use UPPER_CASE for unexported constants: `const defaultTimeout = 30`
+- Use CamelCase for exported (public) names: `func LoadConfig()`, `type Message struct`
+- Use single-letter variables only for loop counters and receivers: `for i := range items`, `func (c *Client) Method()`
+- Avoid abbreviations unless they're common: `id` is OK, avoid `ci` for clientID
+
+#### Functions & Methods
+- Use short function receivers (1-2 characters): `func (c *Client)`, `func (m *Message)`
+- Export (capitalize) functions that are meant to be used outside the package
+- Keep receiver types consistent: use pointer receivers for methods that modify state
+- Use error handling idiom: `if err != nil { return err }`
+
+#### Interfaces & Types
+- Suffix interfaces with "er" when they describe behavior: `Reader`, `Writer`, `Handler`
+- Keep interfaces small and focused (1-3 methods when possible)
+- Use concrete types when possible; interfaces for abstraction only
+
+#### Comments
+- Comments should be complete sentences
+- Exported functions and types must have comments: `// LoadConfig loads the configuration from file or environment.`
+- Use `//` for line comments and `/* */` for block comments
+- Avoid obvious comments; explain "why", not "what"
+
+#### Format & Tools
+- Run `gofmt -w .` before committing
+- Use `go vet ./...` to check for common mistakes
+- Follow `golint` recommendations for code quality
+- Use `go fmt` to auto-format all code consistently
+
+#### Error Handling
+- Always check errors: `if err != nil { return err }`
+- Wrap errors with context: `return fmt.Errorf("operation failed: %w", err)`
+- Never ignore errors silently
+
+### Official Go Style References
+When in doubt, refer to these authoritative guides:
+
+1. **Effective Go** (Official Go Documentation)
+   - https://golang.org/doc/effective_go
+   - The definitive guide to writing clear, idiomatic Go
+   - Covers formatting, comments, names, semicolons, control structures, functions, data, blank identifier, embedding, concurrency, errors, and more
+
+2. **Go Code Review Comments** (Google's Go Experience)
+   - https://github.com/golang/go/wiki/CodeReviewComments
+   - Common mistakes and idioms discovered through code reviews
+   - Quick reference for best practices
+
+3. **Uber's Go Style Guide**
+   - https://github.com/uber-go/guide/blob/master/style.md
+   - Practical, real-world focused style guide with examples
+   - Covers project structure, dependency management, and common patterns
+
+4. **Google's Go Style**
+   - https://google.github.io/styleguide/go/
+   - Formal style guide for consistency in large projects
+   - Comprehensive coverage of Go conventions
+
+**Golden Rule**: When in doubt about style, prioritize readability and maintainability. Go's philosophy is "clarity is paramount."
+
+### Package Organization
+- **cmd/**: Contains only the main entry point; minimal logic
+- **app/**: Core business logic and application workflow
+- **config/**: Configuration loading, validation, and environment setup
+- **http_server/**: HTTP handlers, routes, and webhook management
+
+### Configuration Management
+- Configuration is loaded via `config.LoadConfig()`
+- Environment variables and config files should be used (implementation in progress)
+- All configuration should be centralized in the config package
+
+### HTTP Server
+- HTTP server is set up in `http_server/http_server.go`
+- Current features: Listen for incoming requests and respond
+- Planned: Message receiving endpoints, webhook handlers
+
+### Database
+- SQLite is used for data persistence
+- Database operations should be encapsulated in appropriate packages
+- Use parameterized queries to prevent SQL injection
+
+## Development Workflow
+
+### Building
+```bash
+make build  # Compile the project (if Makefile is set up)
+go build -o build/main ./cmd/main.go  # Manual build command
+```
+
+### Running
+```bash
+./build/main
+```
+
+### Testing
+Follow Go testing conventions:
+- Test files: `*_test.go` in the same package
+- Run tests: `go test ./...`
+
+## Common Tasks
+
+### Adding a New Configuration Option
+1. Add field to config struct in `config/config.go`
+2. Update `LoadConfig()` to parse the new option
+3. Update documentation and validation
+
+### Adding a New HTTP Endpoint
+1. Create handler function in `http_server/http_server.go`
+2. Register route in the server setup
+3. Add logging for request/response tracking
+
+### Adding WhatsApp Features
+1. Leverage `go.mau.fi/whatsmeow` library
+2. Handle events in `app/app.go`
+3. Implement proper logging and error handling
+4. Consider async message processing for performance
+
+## TODO Items (From README)
+- [ ] Finish configuration management (OAuth, authorization)
+- [ ] Create endpoints for receiving messages and sending responses
+- [ ] Implement message processing logic
+- [ ] Add proper error handling and validation
+
+## Code Review Checklist
+- [ ] Error handling is comprehensive
+- [ ] Logging uses appropriate levels (debug, info, warn, error)
+- [ ] Configuration is properly validated
+- [ ] No hardcoded values or secrets
+- [ ] Testing coverage for critical paths
+- [ ] Documentation for public functions
+
+## Important Notes
+- Keep database credentials and API keys in environment variables or secure config files
+- WhatsApp Client lifecycle management (initialization, authentication) should be centralized
+- HTTP handlers should be non-blocking for better concurrency
+- Use goroutines appropriately for long-running operations (message processing, API calls)

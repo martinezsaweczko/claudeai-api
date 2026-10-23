@@ -1,0 +1,28 @@
+name: Vulnerability check
+
+# New advisories are published independently of commits, so a pinned Go version
+# or dependency can start failing govulncheck without any change in this
+# repository. This scheduled run surfaces that on main instead of on an
+# unrelated pull request.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run vulnerability check
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...

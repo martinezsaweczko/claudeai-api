@@ -1,0 +1,137 @@
+name: CI - Build & Test
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.coverage.outputs.total }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run go fmt check
+        run: |
+          gofmt -l .
+          if [ $(gofmt -l . | wc -l) -gt 0 ]; then
+            echo "Some files are not formatted. Run 'go fmt ./...'"
+            exit 1
+          fi
+
+      - name: Run vulnerability check
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
+
+      - name: Verify go.mod tidiness
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum || (echo "go.mod or go.sum is not tidy" && exit 1)
+
+      - name: Install swag
+        run: go install github.com/swaggo/swag/cmd/swag@latest
+
+      - name: Verify Swagger docs are up to date
+        run: make check-swagger
+
+      - name: Build application
+        run: go build -o build/main cmd/main.go
+
+      # Runs the suite once (with -race) and writes coverage.out without the
+      # generated docs package; `make coverage` gives the same figure locally.
+      - name: Run tests with coverage
+        run: make coverage
+
+      - name: Report coverage
+        id: coverage
+        run: |
+          total="$(make -s coverage-total)"
+          if ! printf '%s' "$total" | grep -Eq '^[0-9]+(\.[0-9]+)?$'; then
+            echo "Unexpected coverage total: '$total'"
+            exit 1
+          fi
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Test coverage"
+            echo
+            echo "Total: **${total}%** (generated \`docs\` package excluded)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify container build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Containerfile
+          push: false
+          tags: whatsappbot-golang:ci
+
+  # Publishes the shields.io endpoint file behind the README coverage badge.
+  # The orphan `badges` branch holds a single commit with coverage.json only.
+  coverage-badge:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: coverage-badge
+      cancel-in-progress: false
+
+    steps:
+      - name: Publish coverage.json to the badges branch
+        env:
+          COVERAGE: ${{ needs.build.outputs.coverage }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if ! printf '%s' "$COVERAGE" | grep -Eq '^[0-9]+(\.[0-9]+)?$'; then
+            echo "Unexpected coverage total: '$COVERAGE'"
+            exit 1
+          fi
+
+          color="$(awk -v c="$COVERAGE" 'BEGIN {
+            if (c >= 80) print "brightgreen"
+            else if (c >= 60) print "yellowgreen"
+            else if (c >= 40) print "yellow"
+            else print "orange"
+          }')"
+
+          workdir="$(mktemp -d)"
+          cd "$workdir"
+          printf '{"schemaVersion":1,"label":"coverage","message":"%s%%","color":"%s"}\n' \
+            "$COVERAGE" "$color" > coverage.json
+          cat coverage.json
+
+          git init --quiet --initial-branch=badges
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add coverage.json
+          git commit --quiet -m "chore(badges): coverage ${COVERAGE}% for ${SOURCE_SHA}"
+
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w 0)"
+          echo "::add-mask::${auth}"
+          git -c "http.extraheader=AUTHORIZATION: basic ${auth}" \
+            push --force "${SERVER_URL}/${REPOSITORY}.git" HEAD:refs/heads/badges

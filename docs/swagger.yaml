@@ -1,0 +1,471 @@
+definitions:
+  handlers.createScheduleRequest:
+    properties:
+      command:
+        type: string
+      group_jid:
+        type: string
+      name:
+        type: string
+      schedule:
+        type: string
+    type: object
+  handlers.errorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  handlers.groupResponse:
+    properties:
+      jid:
+        type: string
+      name:
+        type: string
+    type: object
+  handlers.notificationRequest:
+    properties:
+      message:
+        type: string
+      recipient:
+        type: string
+    type: object
+  handlers.notificationResponse:
+    properties:
+      status:
+        type: string
+    type: object
+  handlers.participantResponse:
+    properties:
+      display_name:
+        type: string
+      is_admin:
+        type: boolean
+      is_super_admin:
+        type: boolean
+      jid:
+        type: string
+      phone_number:
+        type: string
+    type: object
+  handlers.scheduledCommandResponse:
+    properties:
+      command:
+        type: string
+      created_at:
+        type: string
+      enabled:
+        type: boolean
+      group_jid:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      schedule:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  handlers.statusResponse:
+    properties:
+      status:
+        type: string
+    type: object
+  handlers.triggerRequest:
+    properties:
+      category:
+        type: string
+      file:
+        type: string
+    type: object
+  handlers.updateScheduleRequest:
+    properties:
+      command:
+        type: string
+      enabled:
+        type: boolean
+      group_jid:
+        type: string
+      name:
+        type: string
+      schedule:
+        type: string
+    type: object
+  model.HealthInfo:
+    properties:
+      status:
+        type: string
+      timestamp:
+        type: string
+    type: object
+  model.VersionInfo:
+    properties:
+      appName:
+        type: string
+      buildTime:
+        type: string
+      version:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: HTTP API for the WhatsApp newspaper kiosk bot.
+  license:
+    name: MIT
+  title: WhatsApp Bot API
+  version: 1.0.0
+paths:
+  /api/v1/file:
+    post:
+      consumes:
+      - application/json
+      description: Notifies all subscribers whose subscription text matches the provided
+        filename.
+      parameters:
+      - description: Subscription trigger
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.triggerRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.statusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.statusResponse'
+      summary: Trigger subscription notifications
+      tags:
+      - Quiosk
+  /api/v1/health:
+    get:
+      consumes:
+      - application/json
+      description: Returns the current health status of the application.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.HealthInfo'
+      summary: Get health status
+      tags:
+      - System
+  /api/v1/notifications:
+    post:
+      consumes:
+      - application/json
+      description: Sends a plain text message to the given WhatsApp recipient.
+      parameters:
+      - description: Notification
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.notificationRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/handlers.notificationResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Send a WhatsApp notification
+      tags:
+      - Whatsapp
+  /api/v1/scheduler:
+    get:
+      description: Returns all scheduled commands.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handlers.scheduledCommandResponse'
+            type: array
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: List scheduled commands
+      tags:
+      - Scheduler
+    post:
+      consumes:
+      - application/json
+      description: Schedules a WhatsApp command to run automatically in a group using
+        a cron expression.
+      parameters:
+      - description: Scheduled command
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.createScheduleRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.scheduledCommandResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Create a scheduled command
+      tags:
+      - Scheduler
+  /api/v1/scheduler/{id}:
+    delete:
+      description: Removes a scheduled command by ID.
+      parameters:
+      - description: Schedule UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Delete a scheduled command
+      tags:
+      - Scheduler
+    put:
+      consumes:
+      - application/json
+      description: Replaces the name, cron expression, command, group and enabled
+        flag of a scheduled command, keeping its ID. The new schedule takes effect
+        immediately. Omitting enabled sets it to true.
+      parameters:
+      - description: Schedule UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Scheduled command
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.updateScheduleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.scheduledCommandResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Update a scheduled command
+      tags:
+      - Scheduler
+  /api/v1/version:
+    get:
+      consumes:
+      - application/json
+      description: Returns build and version metadata.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.VersionInfo'
+      summary: Get version information
+      tags:
+      - System
+  /api/v1/whatsapp/groups:
+    get:
+      description: Returns the WhatsApp groups the bot is participating in.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handlers.groupResponse'
+            type: array
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: List WhatsApp groups
+      tags:
+      - Whatsapp
+  /api/v1/whatsapp/groups/{jid}/participants:
+    get:
+      description: Returns the participants of the given WhatsApp group.
+      parameters:
+      - description: Group JID
+        in: path
+        name: jid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handlers.participantResponse'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "502":
+          description: Bad Gateway
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: List group participants
+      tags:
+      - Whatsapp
+  /internacional_folder/{file}:
+    get:
+      description: Downloads a file from the configured kiosk folder. Requires a valid
+        JWT token passed as the access_token query parameter.
+      parameters:
+      - description: File name
+        in: path
+        name: file
+        required: true
+        type: string
+      - description: JWT token
+        in: query
+        name: access_token
+        required: true
+        type: string
+      responses:
+        "200":
+          description: File content
+          schema:
+            type: file
+        "401":
+          description: Missing or invalid JWT token
+          schema:
+            type: string
+        "404":
+          description: File not found
+          schema:
+            type: string
+      summary: Download a kiosk file
+      tags:
+      - Quiosk
+  /magazine_folder/{file}:
+    get:
+      description: Downloads a file from the configured kiosk folder. Requires a valid
+        JWT token passed as the access_token query parameter.
+      parameters:
+      - description: File name
+        in: path
+        name: file
+        required: true
+        type: string
+      - description: JWT token
+        in: query
+        name: access_token
+        required: true
+        type: string
+      responses:
+        "200":
+          description: File content
+          schema:
+            type: file
+        "401":
+          description: Missing or invalid JWT token
+          schema:
+            type: string
+        "404":
+          description: File not found
+          schema:
+            type: string
+      summary: Download a kiosk file
+      tags:
+      - Quiosk
+  /metrics:
+    get:
+      description: Exposes Prometheus-compatible metrics.
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: Prometheus metrics text
+          schema:
+            type: string
+      summary: Prometheus metrics
+      tags:
+      - System
+  /nacional_folder/{file}:
+    get:
+      description: Downloads a file from the configured kiosk folder. Requires a valid
+        JWT token passed as the access_token query parameter.
+      parameters:
+      - description: File name
+        in: path
+        name: file
+        required: true
+        type: string
+      - description: JWT token
+        in: query
+        name: access_token
+        required: true
+        type: string
+      responses:
+        "200":
+          description: File content
+          schema:
+            type: file
+        "401":
+          description: Missing or invalid JWT token
+          schema:
+            type: string
+        "404":
+          description: File not found
+          schema:
+            type: string
+      summary: Download a kiosk file
+      tags:
+      - Quiosk
+swagger: "2.0"
