@@ -14,6 +14,7 @@ type Config struct {
 	Log            LogConfig
 	O11            O11Config
 	Claude         ClaudeConfig // Claude CLI backend and optional API-key auth
+	Skills         SkillsConfig // Optional skills repository synced for the Claude CLI
 }
 
 // internalWriteTimeoutSeconds is the fixed write timeout of the internal server,
@@ -79,6 +80,10 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 	var claudeTimeout time.Duration
 	var claudeMaxConcurrency int
 
+	// Define command-line flags for the optional skills repository
+	var skillsRepo, skillsRef, skillsDir, skillsSSHKey, skillsKnownHosts string
+	var skillsRefresh, skillsSyncTimeout time.Duration
+
 	// Flags public API server
 	flag.StringVar(&serverAddress, "http-address", "0.0.0.0", "Public API server address")
 	flag.IntVar(&serverPort, "http-port", 46564, "Public API server port")
@@ -105,6 +110,15 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 	flag.StringVar(&claudeModels, "claude-models", "sonnet,opus,haiku", "Comma-separated model ids advertised by GET /v1/models (the default model is added if missing)")
 	flag.DurationVar(&claudeTimeout, "claude-timeout", 5*time.Minute, "Max wall time per request")
 	flag.IntVar(&claudeMaxConcurrency, "claude-max-concurrency", 4, "Max simultaneous Claude CLI processes")
+
+	// Skills flags (disabled when -skills-repo is empty; paths only, no secrets)
+	flag.StringVar(&skillsRepo, "skills-repo", "", "Git URL of the skills repository (ssh, https or file://; no embedded credentials); empty disables skills")
+	flag.StringVar(&skillsRef, "skills-ref", "main", "Branch, tag or full commit sha of the skills repository to serve")
+	flag.StringVar(&skillsDir, "skills-dir", "", "State directory for the skills clone and versions (default <user cache dir>/claudeai-api/skills)")
+	flag.DurationVar(&skillsRefresh, "skills-refresh", 5*time.Minute, "Skills re-sync interval (0 syncs once at startup; minimum 30s otherwise)")
+	flag.StringVar(&skillsSSHKey, "skills-ssh-key", "", "Path to the private key file used to clone the skills repository over ssh")
+	flag.StringVar(&skillsKnownHosts, "skills-known-hosts", "", "Path to the known_hosts file used to verify the skills git host")
+	flag.DurationVar(&skillsSyncTimeout, "skills-sync-timeout", 2*time.Minute, "Max wall time of one skills sync")
 
 	flag.Parse()
 
@@ -169,6 +183,26 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 	}
 
 	if err := config.Claude.validate(); err != nil {
+		listErrors = append(listErrors, err)
+	}
+
+	config.Skills = SkillsConfig{
+		Repo:        strings.TrimSpace(skillsRepo),
+		Ref:         strings.TrimSpace(skillsRef),
+		Dir:         strings.TrimSpace(skillsDir),
+		Refresh:     skillsRefresh,
+		SSHKey:      strings.TrimSpace(skillsSSHKey),
+		KnownHosts:  strings.TrimSpace(skillsKnownHosts),
+		SyncTimeout: skillsSyncTimeout,
+	}
+	if config.Skills.Enabled() && config.Skills.Dir == "" {
+		if dir, err := defaultSkillsDir(); err != nil {
+			listErrors = append(listErrors, err)
+		} else {
+			config.Skills.Dir = dir
+		}
+	}
+	if err := config.Skills.validate(); err != nil {
 		listErrors = append(listErrors, err)
 	}
 

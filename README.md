@@ -56,6 +56,13 @@ make check-swagger     # verify generated Swagger docs are up to date
 | `-claude-models` | `sonnet,opus,haiku` | Comma-separated ids advertised by `GET /v1/models` (no empty entries; duplicates removed; the default model is added if missing). Any model the CLI accepts still works in requests |
 | `-claude-timeout` | `5m` | Max wall time per request |
 | `-claude-max-concurrency` | `4` | Max simultaneous CLI processes (>= 1) |
+| `-skills-repo` | empty | Git URL of a skills repository (ssh `git@host:o/r.git`, https, `file://` or a local path; URLs with embedded credentials are rejected). Empty disables skills |
+| `-skills-ref` | `main` | Branch, tag or full commit sha to serve |
+| `-skills-dir` | `<user cache dir>/claudeai-api/skills` | State directory (bare clone cache and read-only `versions/<sha>/`) |
+| `-skills-refresh` | `5m` | Re-sync interval; `0` syncs once at startup; otherwise at least `30s` |
+| `-skills-ssh-key` | empty | Path to a read-only deploy key file for ssh URLs (only the path is configured) |
+| `-skills-known-hosts` | empty | Path to a `known_hosts` file; host keys are always verified |
+| `-skills-sync-timeout` | `2m` | Max wall time of one sync |
 
 Full list: `./build/main -h`
 
