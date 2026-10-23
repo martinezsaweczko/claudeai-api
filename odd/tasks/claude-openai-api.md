@@ -25,7 +25,7 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - [x] T2 Config: Claude section, env-var secrets, Bearer API-key middleware (API key auth is OPTIONAL: no keys => auth disabled)
 - [x] T3 Claude backend interface + CLI implementation (stream-json parsing, errors, fake CLI tests)
 - [x] T4 `/v1/models` + non-streaming `/v1/chat/completions`
-- [ ] T5 SSE streaming chunks
+- [x] T5 SSE streaming chunks
 - [ ] T6a Create skills repo (plugin marketplace layout, example skill, README) locally
 - [ ] T6b Service-side skills sync (pinned ref, refresh timer/webhook, `--plugin-dir`, version metric)
 - [ ] T7 Metrics + traces (requests, latency, TTFT, tokens, cost, process errors, skills version; spans; Grafana)
@@ -69,6 +69,16 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - RED observed first (ChatBackend undefined; app routes unwired).
 - Verified by parent: build, vet, gofmt, test -race, mod tidy clean; no leftover processes. Writer smoke: ONE real call via Python urllib (no curl on host): /v1/models 200, chat completions with haiku -> 200 "OK", prompt_tokens 815.
 - Native review: medium risk (slice budget), consent granted, single reliability lens -> APPROVED and acknowledged (lineage review-d630af61c31e2b92). 4 advisory findings: (1) nil-deref of observability in initAndWire - confirmed, but panic was pre-existing in template health handler; fixed in 0e0b0c5 by returning an error; (2) chat.go:294-296 user-final check relies on backend ErrInvalidRequest -> 400 (works, not enforced in handler); (3) chat.go:273 trailing JSON after first value is ignored; (4) chat.go:369 crypto/rand error ignored. (2)-(4) not acted on.
+- Open: `make check-swagger` not run; `Close()` still not wired into shutdown; no new metric instruments (T7).
+
+### T5 — done
+- Route: delegated direct (one writer). Trigger: new streaming file + tests across handlers/app/docs (13 files).
+- Commit: 8e10a06 `feat: stream chat completions as server-sent events` (+980/-61).
+- Behavior: `stream:true` returns OpenAI `chat.completion.chunk` SSE (role chunk, deltas, finish chunk, optional usage chunk with `stream_options.include_usage`, `[DONE]`). Response is committed on the first delta, so earlier failures use the normal JSON error mapping (shared `mapBackendError`); later failures are one SSE error event then `[DONE]`. Client disconnect cancels the backend (CLI killed), 499 with no body if nothing was sent. Write deadline cleared per stream. Flush support is probed by walking `Unwrap` (calling Flush would commit headers). Chunks carry the requested model (the resolved model is only known at the end). No heartbeat goroutine (documented proxy limitation).
+- Also fixed T4 leftovers: trailing JSON after the request body now 400 `invalid_json`; crypto/rand failure falls back to time+counter completion id.
+- RED observed first (completionIDFrom undefined, then stream tests failing on the old stub).
+- Verified by parent: build, vet, gofmt, test -race, mod tidy clean; no leftover processes. Tests include incremental delivery over a real httptest.Server and through the full middleware chain (tracing, metrics, logging, apiKeyAuth), 3x flake run. Writer smoke: ONE real streaming call (haiku): first delta at 2.12s, finish at 2.89s, usage 830/11; CLI batches several tokens per delta.
+- Native review: medium risk, consent granted, single reliability lens -> APPROVED and acknowledged (lineage review-0d6bc2b8144532fa). 2 advisory warnings: (1) `stream_options` is decoded for all requests, so a malformed `stream_options` on a non-streaming request now gets 400 instead of being ignored; (2) `ChatBackend` gained `Stream` (all in-repo fakes updated). Neither acted on.
 - Open: `make check-swagger` not run; `Close()` still not wired into shutdown; no new metric instruments (T7).
 
 - Carry-forward: T4/T5 error mapping ErrAuth->401/500, ErrRateLimited->429, ErrBusy->429/503, ErrTimeout->504, ErrInvalidModel->404 model_not_found, ErrInvalidRequest->400, ErrCLI/ErrNotFound->502/500; after SSE starts, errors go as a final SSE error event. T6b must revisit `--tools ""` and `--disable-slash-commands` (they disable skills) alongside `--plugin-dir`, while keeping `--setting-sources ""`. T8 container needs `claude` binary, CLAUDE_CODE_OAUTH_TOKEN secret, writable temp dir.
