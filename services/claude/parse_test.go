@@ -2,10 +2,12 @@ package claude
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -201,5 +203,88 @@ func TestSanitize(t *testing.T) {
 	}
 	if got := sanitize(long); len([]rune(got)) > maxErrMessageRunes+1 {
 		t.Errorf("sanitize did not truncate: %d runes", len([]rune(got)))
+	}
+}
+
+func deltasOf(events []Event) []string {
+	var out []string
+	for _, e := range events {
+		if e.Type == EventTextDelta {
+			out = append(out, e.Text)
+		}
+	}
+	return out
+}
+
+func TestParserSkillInvocationFixture(t *testing.T) {
+	p, events := feedFixture(t, "skill_invocation.stream.jsonl")
+	deltas := deltasOf(events)
+	if len(deltas) == 0 {
+		t.Fatal("no text deltas")
+	}
+	joined := strings.Join(deltas, "")
+	for _, leak := range []string{"tool_use", "toolu_", "partial_json", "\"skill\"", "Launching skill", "Base directory", "Skill"} {
+		if strings.Contains(joined, leak) {
+			t.Errorf("tool content leaked into text (%q): %q", leak, joined)
+		}
+	}
+	if strings.HasPrefix(joined, "\n") {
+		t.Errorf("first turn emitted no text, so no separator is allowed: %q", joined)
+	}
+	res, err := p.finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != joined {
+		t.Errorf("Result.Text %q != concatenated deltas %q", res.Text, joined)
+	}
+	if res.Model != "claude-haiku-5-5" || res.StopReason != "end_turn" {
+		t.Errorf("model/stop = %q/%q", res.Model, res.StopReason)
+	}
+	if res.Usage.OutputTokens == 0 || res.CostUSD <= 0 {
+		t.Errorf("usage/cost not taken from the final result: %+v %v", res.Usage, res.CostUSD)
+	}
+}
+
+func textDeltaLine(text string) []byte {
+	b, _ := json.Marshal(map[string]any{"type": "stream_event", "event": map[string]any{"type": "content_block_delta", "delta": map[string]any{"type": "text_delta", "text": text}}})
+	return b
+}
+
+func TestParserSeparatesTurnsOnlyAfterEarlierText(t *testing.T) {
+	msgStart := []byte(`{"type":"stream_event","event":{"type":"message_start"}}`)
+	toolDelta := []byte(`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"skill\":\"x\"}"}}}`)
+	result := []byte(`{"type":"result","subtype":"success","is_error":false,"result":"LAST TURN ONLY","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2},"num_turns":3}`)
+
+	p := newStreamParser()
+	var got []string
+	feed := func(line []byte) {
+		evs, err := p.feed(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, deltasOf(evs)...)
+	}
+	feed(msgStart)
+	feed(textDeltaLine("Let me check."))
+	feed(textDeltaLine(" One moment."))
+	feed(toolDelta) // never leaks
+	feed(msgStart)  // second turn
+	feed(textDeltaLine("Done."))
+	feed(textDeltaLine(" Bye."))
+	feed(msgStart) // third turn without text: nothing to separate
+	feed(msgStart)
+	feed(textDeltaLine("Final."))
+	want := []string{"Let me check.", " One moment.", "\n\nDone.", " Bye.", "\n\nFinal."}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("deltas = %q, want %q", got, want)
+	}
+	feed(result)
+	res, err := p.finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wantText := strings.Join(want, ""); res.Text != wantText {
+		t.Fatalf("Text = %q, want accumulated %q (not the last turn only)", res.Text, wantText)
 	}
 }

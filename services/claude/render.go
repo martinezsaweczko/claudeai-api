@@ -13,6 +13,11 @@ const maxSystemArgBytes = 100 << 10
 
 const defaultSystemPrompt = "You are a helpful assistant."
 
+// skillsHint is appended to the system prompt when skills are active. The model
+// decides on its own whether to call the Skill tool, and in practice skips it
+// on plain prompts, so the hint states the expectation explicitly.
+const skillsHint = "You have skills available through the Skill tool. Use a skill whenever its description matches the user's request."
+
 const transcriptHeader = "Below is the conversation so far. Reply only with the assistant's next message, without any role label."
 
 // renderPrompt flattens the OpenAI-style history into the text sent on stdin.
@@ -49,24 +54,35 @@ func renderPrompt(messages []Message) (string, error) {
 
 // buildArgs returns the CLI arguments (the prompt is sent on stdin). Every flag
 // was verified against `claude --help` and real calls (see the package doc).
-func buildArgs(model, system string) []string {
-	return []string{
+//
+// With skills=false every tool, setting source and slash command is disabled.
+// With skills=true only the Skill tool is allowed and the project setting
+// source is loaded; the working directory is the skills snapshot, which holds
+// nothing but .claude/skills (no settings, hooks, agents or commands), and
+// --disable-slash-commands is dropped because it also disables skills.
+func buildArgs(model, system string, skills bool) []string {
+	tools, sources := "", ""
+	if skills {
+		tools, sources = "Skill", "project"
+	}
+	args := []string{
 		"-p",
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
-		"--tools", "",
+		"--tools", tools,
 		"--no-session-persistence",
 		"--model", model,
 		"--system-prompt", system,
 		// Isolation: do not load the host's user/project settings, hooks, MCP
-		// servers, skills or Chrome integration into chat requests.
-		"--setting-sources", "",
+		// servers or Chrome integration into chat requests.
+		"--setting-sources", sources,
 		"--strict-mcp-config",
-		"--disable-slash-commands",
-		"--no-chrome",
-		"--permission-prompts", "none",
 	}
+	if !skills {
+		args = append(args, "--disable-slash-commands")
+	}
+	return append(args, "--no-chrome", "--permission-prompts", "none")
 }
 
 // filterEnv removes variables that override the subscription login and, when a

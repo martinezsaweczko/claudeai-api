@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -572,5 +573,173 @@ func TestIntegrationRealCLI(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToUpper(res.Text), "OK") {
 		t.Errorf("unexpected reply %q", res.Text)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Skills integration
+// ---------------------------------------------------------------------------
+
+type echoPayload struct {
+	Args  []string `json:"args"`
+	Stdin string   `json:"stdin"`
+	Cwd   string   `json:"cwd"`
+}
+
+func runEcho(t *testing.T, b *CLIBackend, req Request) echoPayload {
+	t.Helper()
+	res, err := b.Complete(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p echoPayload
+	if err := json.Unmarshal([]byte(res.Text), &p); err != nil {
+		t.Fatalf("echo payload %q: %v", res.Text, err)
+	}
+	return p
+}
+
+func argValue(args []string, flag string) (string, bool) {
+	for i, a := range args {
+		if a == flag && i+1 < len(args) {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
+func hasArg(args []string, flag string) bool {
+	for _, a := range args {
+		if a == flag {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSkillsModeFlagsAndCwd(t *testing.T) {
+	snap := t.TempDir()
+	snapReal, _ := filepath.EvalSymlinks(snap)
+	tests := []struct {
+		name     string
+		provider func() (string, bool)
+		skills   bool
+	}{
+		{"no provider", nil, false},
+		{"provider without snapshot", func() (string, bool) { return "", false }, false},
+		{"provider with empty dir", func() (string, bool) { return "", true }, false},
+		{"snapshot", func() (string, bool) { return snap, true }, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			work := t.TempDir()
+			workReal, _ := filepath.EvalSymlinks(work)
+			b := newFakeBackend(t, config.ClaudeConfig{}, map[string]string{envScenario: "echo"}, WithWorkDir(work), WithSkills(tt.provider))
+			p := runEcho(t, b, Request{System: "be brief", Messages: simpleReq.Messages})
+
+			tools, _ := argValue(p.Args, "--tools")
+			sources, _ := argValue(p.Args, "--setting-sources")
+			system, _ := argValue(p.Args, "--system-prompt")
+			if tt.skills {
+				if tools != "Skill" || sources != "project" || hasArg(p.Args, "--disable-slash-commands") {
+					t.Errorf("skills flags wrong: %q", p.Args)
+				}
+				if p.Cwd != snapReal {
+					t.Errorf("cwd = %q, want snapshot %q", p.Cwd, snapReal)
+				}
+				if system != "be brief\n\n"+skillsHint {
+					t.Errorf("system = %q", system)
+				}
+				if !hasArg(p.Args, "--strict-mcp-config") || !hasArg(p.Args, "--no-chrome") {
+					t.Errorf("isolation flags missing: %q", p.Args)
+				}
+				return
+			}
+			want := buildArgs("sonnet", "be brief", false)
+			if !reflect.DeepEqual(p.Args, want) {
+				t.Errorf("args = %q, want %q", p.Args, want)
+			}
+			if p.Cwd != workReal {
+				t.Errorf("cwd = %q, want %q", p.Cwd, workReal)
+			}
+		})
+	}
+}
+
+func TestSkillsDefaultSystemPromptKeepsHint(t *testing.T) {
+	snap := t.TempDir()
+	b := newFakeBackend(t, config.ClaudeConfig{}, map[string]string{envScenario: "echo"}, WithSkills(func() (string, bool) { return snap, true }))
+	p := runEcho(t, b, simpleReq)
+	system, _ := argValue(p.Args, "--system-prompt")
+	if system != defaultSystemPrompt+"\n\n"+skillsHint {
+		t.Fatalf("system = %q", system)
+	}
+}
+
+func TestSkillsProviderCalledOncePerRun(t *testing.T) {
+	snapA, snapB := t.TempDir(), t.TempDir()
+	realA, _ := filepath.EvalSymlinks(snapA)
+	var calls int
+	b := newFakeBackend(t, config.ClaudeConfig{}, map[string]string{envScenario: "echo"}, WithSkills(func() (string, bool) {
+		calls++
+		if calls == 1 {
+			return snapA, true
+		}
+		return snapB, true
+	}))
+	p := runEcho(t, b, simpleReq)
+	if calls != 1 {
+		t.Fatalf("provider calls = %d, want 1 per run", calls)
+	}
+	if p.Cwd != realA {
+		t.Fatalf("cwd = %q, want first snapshot %q", p.Cwd, realA)
+	}
+	// The next run sees the new snapshot.
+	realB, _ := filepath.EvalSymlinks(snapB)
+	if p2 := runEcho(t, b, simpleReq); p2.Cwd != realB || calls != 2 {
+		t.Fatalf("second run cwd = %q calls = %d", p2.Cwd, calls)
+	}
+}
+
+func TestCloseRemovesOwnedTempDir(t *testing.T) {
+	b := NewCLIBackend(config.ClaudeConfig{Bin: os.Args[0], Model: "sonnet", Timeout: 30 * time.Second, MaxConcurrency: 1},
+		WithBinArgs("-test.run=^TestHelperProcess$", "--"),
+		WithEnv(func() []string { return append(os.Environ(), envHelper+"=1", envScenario+"=echo") }))
+	p := runEcho(t, b, simpleReq)
+	if _, err := os.Stat(p.Cwd); err != nil {
+		t.Fatalf("temp cwd missing before Close: %v", err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p.Cwd); !os.IsNotExist(err) {
+		t.Fatalf("temp cwd still present after Close: %v", err)
+	}
+}
+
+func TestSkillInvocationStreamAndCompleteAgree(t *testing.T) {
+	snap := t.TempDir()
+	b := newFakeBackend(t, config.ClaudeConfig{}, map[string]string{envScenario: "fixture", envFixture: fixturePath(t, "skill_invocation.stream.jsonl")},
+		WithSkills(func() (string, bool) { return snap, true }))
+
+	var streamed strings.Builder
+	res, err := b.Stream(context.Background(), simpleReq, func(e Event) error {
+		if e.Type == EventTextDelta {
+			streamed.WriteString(e.Text)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	comp, err := b.Complete(context.Background(), simpleReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text != comp.Text || res.Text != streamed.String() {
+		t.Fatalf("stream %q / complete %q / deltas %q must agree", res.Text, comp.Text, streamed.String())
+	}
+	if !strings.HasPrefix(res.Text, "The Go scheduler") || strings.Contains(res.Text, "skill") {
+		t.Fatalf("text = %q", res.Text)
 	}
 }

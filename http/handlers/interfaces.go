@@ -6,6 +6,7 @@ import (
 
 	"github.com/martinezsaweczko/claudeai-api/http/middleware"
 	"github.com/martinezsaweczko/claudeai-api/services/claude"
+	"github.com/martinezsaweczko/claudeai-api/services/skills"
 )
 
 type Router interface {
@@ -22,4 +23,12 @@ type ChatBackend interface {
 	// aborts the run (the CLI process is killed) and is returned.
 	Stream(ctx context.Context, req claude.Request, emit func(claude.Event) error) (claude.Result, error)
 	Complete(ctx context.Context, req claude.Request) (claude.Result, error)
+}
+
+// SkillsSource is the skills syncer capability consumed by the skills
+// handler. It is satisfied by *skills.Syncer.
+type SkillsSource interface {
+	Current() (skills.Snapshot, bool)
+	Status() skills.Status
+	Trigger()
 }

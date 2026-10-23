@@ -96,6 +96,8 @@ OpenAI clients use the base URL `http://<host>:<http-port>/v1` (public server). 
 | `GET /v1/models/{model}` | One advertised model, or 404 `model_not_found` |
 | `POST /v1/chat/completions` | Chat completion, JSON or SSE (`stream: true`) |
 
+Internal server (never expose it publicly): `GET /api/v1/skills`, `POST /api/v1/skills/refresh` (see [Skills](#skills)).
+
 ### Chat completions request fields
 
 - **Used**: `model` (empty uses `-claude-model`; passed to the CLI as is, so aliases and full ids work), `messages` (required), `stream` (SSE when `true`), `stream_options.include_usage` (only with `stream: true`).
@@ -178,6 +180,61 @@ client = OpenAI(base_url="http://127.0.0.1:46564/v1", api_key="anything")  # use
 r = client.chat.completions.create(model="haiku", messages=[{"role": "user", "content": "Hi"}])
 print(r.choices[0].message.content)
 ```
+
+## Skills
+
+Optional. Skills (Claude Code `SKILL.md` folders) live in a **separate private git repository** laid out as a plugin marketplace (`.claude-plugin/marketplace.json` -> `plugins/<plugin>/skills/<name>/SKILL.md`). The gateway clones it with the `git` binary, validates it and serves the skills to every `claude -p` run. Skills stay **disabled** unless `-skills-repo` is set; with skills disabled, with no successful sync yet, or with a repository that has zero valid skills, requests run exactly as before.
+
+### How it works
+
+1. A background syncer fetches `-skills-ref` into a bare cache, validates the tree (no symlinks, size and count limits, `name` in the frontmatter must equal the directory) and copies **only** the validated skills into a read-only `-skills-dir/versions/<sha>/.claude/skills/<name>/`. Hooks, MCP servers, agents and commands from the repository are never copied.
+2. Each request resolves the current snapshot once, runs the CLI with that directory as its working directory and the flags `--tools Skill --setting-sources project` (and without `--disable-slash-commands`, which also disables skills). A sync that finishes mid-run does not affect running requests.
+3. The system prompt gets one extra sentence telling the model it has skills through the Skill tool and should use one whenever its description matches the request. The model still decides: write clear skill `description`s, since that is what it matches against. Streaming and non-streaming responses contain only the final text (tool calls are never forwarded); the text of several assistant turns is joined with a blank line.
+
+`--plugin-dir` is deliberately **not** used: a plugin SessionStart hook executed even with the isolation flags, so a compromised skills repository would get code execution. Skills-only materialization cannot carry hooks.
+
+### Cost
+
+Enabling skills raises the prompt from about 0.9k to about 7.8k tokens per request, mostly Claude Code's bundled skills and the Skill tool definition, and mostly served from the prompt cache. A request that actually invokes a skill takes at least one extra model turn: measured with haiku, `usage.prompt_tokens` was about 10.2k (it sums the input of every turn) and latency about 3s longer than without a skill.
+
+### Setup with a read-only deploy key
+
+```bash
+mkdir -p ~/.config/claudeai-api && cd ~/.config/claudeai-api
+ssh-keygen -t ed25519 -N "" -f skills_deploy_key -C claudeai-api-skills
+gh repo deploy-key add skills_deploy_key.pub -R OWNER/skills-repo -t claudeai-api-skills   # read-only unless --allow-write
+gh api meta --jq '.ssh_keys[] | "github.com " + .' > known_hosts   # pinned GitHub host keys
+chmod 600 skills_deploy_key
+```
+
+```bash
+./build/main -http-address 127.0.0.1 \
+  -skills-repo git@github.com:OWNER/skills-repo.git \
+  -skills-ssh-key ~/.config/claudeai-api/skills_deploy_key \
+  -skills-known-hosts ~/.config/claudeai-api/known_hosts \
+  -skills-dir /var/lib/claudeai-api/skills
+```
+
+Only the key **path** is configured and logged; the key content is never read by the gateway, logged or returned. Host keys are always verified (`StrictHostKeyChecking=yes`). A missing key or known_hosts file stops startup with an error; a transient git failure only logs a warning and the last good snapshot stays in use.
+
+### Refresh and status (internal server)
+
+The syncer re-syncs every `-skills-refresh` (default 5m, jittered, with backoff after failures). The startup does one bounded initial sync (at most 20s) before the servers accept traffic.
+
+```bash
+curl http://127.0.0.1:9000/api/v1/skills                    # enabled, commit, skills, skipped, sync health
+curl -X POST http://127.0.0.1:9000/api/v1/skills/refresh   # 202 {"status":"triggered"}; 404 skills_disabled when off
+```
+
+`POST .../refresh` is non-blocking and coalesced; poll `GET .../skills` for the new commit (for example from a repository webhook relay). Both endpoints are **unauthenticated, like health and metrics**: the internal port must never be exposed publicly. When skills are disabled `GET` answers `{"enabled":false}`.
+
+### Threat model
+
+- The deploy key is read-only and scoped to the one repository; a leaked key allows reading that repository only.
+- The skills repository is trusted input: its skill text is given to the model, so a compromised repository can inject prompts (prompt injection). The model only has the Skill tool (no shell, no files, no network tools), which bounds what an injected prompt can do, but it can shape answers. Review skill changes like code.
+- The CLI reads project settings from its working directory **and its ancestors**: keep `-skills-dir` in a dedicated directory with no `CLAUDE.md` or `.claude/settings*` above it.
+- The syncer never executes repository content (bare clone, `ls-tree`/`cat-file`, no checkout, hooks or symlinks).
+- Container note: the image needs `git` and `openssh-client` for ssh remotes (the Containerfile is handled in T8).
 
 ## API documentation
 

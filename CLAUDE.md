@@ -32,7 +32,7 @@ make ci                                   # the CI checks locally (all but the c
 ### Two HTTP servers
 
 - **Public** (`-http-*`, default `:46564`): the OpenAI-compatible API. Write timeout defaults to 0 (disabled) so SSE streams are not cut; read and idle timeouts still apply.
-- **Internal** (default `:9000`, **no authentication**, base path `/api/v1`): health, version, Swagger docs and Prometheus metrics. It uses a fixed 30s write timeout.
+- **Internal** (default `:9000`, **no authentication**, base path `/api/v1`): health, version, Swagger docs, Prometheus metrics and the skills status/refresh endpoints. It uses a fixed 30s write timeout.
 
 ### Middleware order
 
@@ -46,4 +46,4 @@ Streaming: `POST /v1/chat/completions` with `stream: true` returns OpenAI `chat.
 
 Backend: `services/claude.CLIBackend` (built in `initAndWire` as `app.claude`) runs `claude -p --output-format stream-json` per request with config isolation flags (`--setting-sources ""`, `--strict-mcp-config`, `--disable-slash-commands`); see the package doc in `services/claude/doc.go` for the verified event shapes and flags.
 
-Skills: `services/skills` (config `-skills-repo`, `-skills-ref`, `-skills-dir`, `-skills-refresh`, `-skills-ssh-key`, `-skills-known-hosts`, `-skills-sync-timeout`) syncs a private skills repo through the `git` binary and exposes `Syncer.Current().Dir` as the CLI cwd for project skills; not wired into `services/claude` yet. See `services/skills/doc.go` for the verified flags (`--tools Skill --setting-sources project`, no `--disable-slash-commands`).
+Skills: `services/skills` (config `-skills-repo`, `-skills-ref`, `-skills-dir`, `-skills-refresh`, `-skills-ssh-key`, `-skills-known-hosts`, `-skills-sync-timeout`) syncs a private skills repo through the `git` binary. `app/skills.go` builds the syncer when `-skills-repo` is set (misconfiguration such as a missing key file fails startup), runs one bounded (20s) initial `Sync` before the servers start (failure only warns), then `Syncer.Run` in a goroutine that shutdown cancels and waits for (5s). `services/claude.WithSkills(func() (dir, ok))` receives the adapted `Current()`; per run it is called once, and when ok the CLI gets `--tools Skill --setting-sources project`, no `--disable-slash-commands`, cwd = snapshot dir and a fixed system-prompt hint (`skillsHint`); otherwise flags are unchanged. `Result.Text` is the text of all assistant turns joined by a blank line (same for Stream and Complete). Internal endpoints (no auth, internal port only): `GET /api/v1/skills` and `POST /api/v1/skills/refresh` (`http/handlers/skills.go`, consumer interface `handlers.SkillsSource`). Shutdown also calls the backend's `Close` (removes its temp cwd). See the README "Skills" section and `services/skills/doc.go` / `services/claude/doc.go`.

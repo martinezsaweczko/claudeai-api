@@ -13,6 +13,7 @@ const (
 	maxLineBytes       = 16 << 20 // stream-json lines (assistant messages) can be large
 	maxErrMessageRunes = 500
 	syntheticModel     = "<synthetic>" // model name the CLI uses for locally generated errors
+	turnSeparator      = "\n\n"        // between text of different assistant turns
 )
 
 type rawUsage struct {
@@ -51,6 +52,7 @@ type rawLine struct {
 type streamParser struct {
 	text      strings.Builder
 	sawDelta  bool
+	newTurn   bool // a message_start was seen since the last text delta
 	model     string
 	gotResult bool
 	isError   bool
@@ -76,9 +78,21 @@ func (p *streamParser) feed(line []byte) ([]Event, error) {
 	switch l.Type {
 	case "stream_event":
 		if l.Event != nil && l.Event.Type == "content_block_delta" && l.Event.Delta.Type == "text_delta" && l.Event.Delta.Text != "" {
+			text := l.Event.Delta.Text
+			// A new assistant turn (after tool use) that follows earlier text
+			// is separated by a blank line so the turns do not run together.
+			if p.newTurn && p.text.Len() > 0 {
+				text = turnSeparator + text
+			}
+			p.newTurn = false
 			p.sawDelta = true
-			p.text.WriteString(l.Event.Delta.Text)
-			return []Event{{Type: EventTextDelta, Text: l.Event.Delta.Text}}, nil
+			p.text.WriteString(text)
+			return []Event{{Type: EventTextDelta, Text: text}}, nil
+		}
+		// Tool use (content_block_start/input_json_delta) and thinking blocks
+		// carry no user-visible text and are ignored.
+		if l.Event != nil && l.Event.Type == "message_start" {
+			p.newTurn = true
 		}
 	case "assistant":
 		if l.Message != nil && l.Message.Model != "" && l.Message.Model != syntheticModel {
@@ -99,9 +113,12 @@ func (p *streamParser) onResult(l *rawLine) []Event {
 		return nil
 	}
 
-	text := l.Result
-	if text == "" {
-		text = p.text.String()
+	// Result.Text is the text of every assistant turn, exactly what a streaming
+	// client received. The CLI's result.result only carries the last turn, so
+	// it is used only when no partial messages were delivered.
+	text := p.text.String()
+	if !p.sawDelta {
+		text = l.Result
 	}
 	p.result = Result{
 		Text:  text,

@@ -28,8 +28,7 @@
 //	    skills. The OAuth login keeps working with these flags; --bare must not
 //	    be used because it ignores OAuth/keychain credentials.
 //	  - `--tools ""` disables every tool, including the Skill tool, and
-//	    --disable-slash-commands disables skills. Skill support (T6b) has to
-//	    revisit both flags (e.g. --plugin-dir plus an allow-list in --tools).
+//	    --disable-slash-commands disables skills. See "Skills" below.
 //	  - CLAUDE_CODE_OAUTH_TOKEN is not needed locally (init reported
 //	    apiKeySource "none" and the stored login worked). It is still forwarded
 //	    when configured, which is the container path. ANTHROPIC_API_KEY and
@@ -77,4 +76,37 @@
 // Error mapping lives in classifyResultError: 401/403 or login-ish text is
 // ErrAuth, 429 or limit-ish text is ErrRateLimited, 404 mentioning a model is
 // ErrInvalidModel, anything else is ErrCLI.
+//
+// # Skills
+//
+// WithSkills enables skills per run. The option takes a function so this
+// package does not depend on the skills syncer; the app adapts the syncer's
+// current snapshot. The function is called once before the process starts and
+// its value is held for the whole run. When it reports a snapshot directory
+// the invocation changes in exactly these ways, otherwise nothing changes:
+//
+//   - --tools "" becomes --tools Skill
+//   - --setting-sources "" becomes --setting-sources project
+//   - --disable-slash-commands is dropped (it also disables skills)
+//   - the working directory is the snapshot directory, which contains only
+//     .claude/skills/<name>/ (no settings, hooks, agents or commands; that is
+//     why --plugin-dir is not used: plugin hooks would execute)
+//   - the system prompt gets skillsHint appended (after the default prompt when
+//     the caller gave none). The model chooses whether to call a skill and
+//     skipped it on plain prompts, so the hint states the expectation.
+//
+// With skills the stream contains assistant tool_use blocks (name "Skill"),
+// input_json_delta deltas, user tool_result lines and a second assistant turn
+// holding the final answer (testdata/skill_invocation.stream.jsonl is a real
+// capture, num_turns is 3). The parser ignores everything but text deltas, so
+// tool JSON never reaches clients. Result.Text is the accumulated text of all
+// assistant turns, which is exactly what a streaming client received; both
+// Stream and Complete return it (the CLI's result.result only holds the last
+// turn and is used only when no partial messages arrived). When a turn emits
+// text after an earlier turn already emitted text, its first delta is prefixed
+// with a blank line. Usage and cost come from the final result line and cover
+// all turns.
+//
+// Close removes the private temp working directory; the app calls it at
+// shutdown.
 package claude

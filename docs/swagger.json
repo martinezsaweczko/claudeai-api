@@ -33,6 +33,52 @@
                 }
             }
         },
+        "/api/v1/skills": {
+            "get": {
+                "description": "Lists the skills of the current snapshot and the health of the sync. Returns `{\"enabled\":false}` when no skills repository is configured. Internal port only: unauthenticated.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Skills"
+                ],
+                "summary": "Skills status",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.skillsResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/skills/refresh": {
+            "post": {
+                "description": "Asks the background syncer to sync now (non-blocking, coalesced) and returns 202. Poll `GET /api/v1/skills` for the result. 404 `skills_disabled` when no skills repository is configured. Internal port only: unauthenticated.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Skills"
+                ],
+                "summary": "Trigger a skills sync",
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.skillsRefreshResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/version": {
             "get": {
                 "description": "Returns build and version metadata.",
@@ -355,6 +401,14 @@
                 }
             }
         },
+        "handlers.errorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.modelList": {
             "type": "object",
             "properties": {
@@ -413,6 +467,95 @@
             "properties": {
                 "error": {
                     "$ref": "#/definitions/handlers.openAIErrorDetailDoc"
+                }
+            }
+        },
+        "handlers.skillItem": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "summarize"
+                },
+                "plugin": {
+                    "type": "string",
+                    "example": "core-skills"
+                }
+            }
+        },
+        "handlers.skillsRefreshResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "example": "triggered"
+                }
+            }
+        },
+        "handlers.skillsResponse": {
+            "type": "object",
+            "properties": {
+                "commit": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "ref": {
+                    "type": "string"
+                },
+                "repo": {
+                    "type": "string"
+                },
+                "skills": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.skillItem"
+                    }
+                },
+                "skipped": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.skippedItem"
+                    }
+                },
+                "sync": {
+                    "$ref": "#/definitions/handlers.skillsSyncStatus"
+                },
+                "synced_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.skillsSyncStatus": {
+            "type": "object",
+            "properties": {
+                "consecutive_failures": {
+                    "type": "integer"
+                },
+                "last_attempt": {
+                    "type": "string"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "last_success": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.skippedItem": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "example": "plugins/x/skills/bad"
+                },
+                "reason": {
+                    "type": "string"
                 }
             }
         },

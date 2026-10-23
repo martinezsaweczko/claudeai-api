@@ -2,6 +2,7 @@ package claude
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -76,7 +77,7 @@ func TestRenderPrompt(t *testing.T) {
 }
 
 func TestBuildArgs(t *testing.T) {
-	args := buildArgs("sonnet", "be brief")
+	args := buildArgs("sonnet", "be brief", false)
 	has := func(flag string) int {
 		for i, a := range args {
 			if a == flag {
@@ -133,5 +134,40 @@ func TestFilterEnv(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildArgsExactLists(t *testing.T) {
+	head := []string{"-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"}
+	tests := []struct {
+		name   string
+		skills bool
+		want   []string
+	}{
+		{"no skills", false, append(append([]string{}, head...),
+			"--tools", "", "--no-session-persistence", "--model", "m", "--system-prompt", "s",
+			"--setting-sources", "", "--strict-mcp-config", "--disable-slash-commands",
+			"--no-chrome", "--permission-prompts", "none")},
+		{"skills", true, append(append([]string{}, head...),
+			"--tools", "Skill", "--no-session-persistence", "--model", "m", "--system-prompt", "s",
+			"--setting-sources", "project", "--strict-mcp-config",
+			"--no-chrome", "--permission-prompts", "none")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildArgs("m", "s", tt.skills)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("args =\n%q\nwant\n%q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSkillsHint(t *testing.T) {
+	if !strings.Contains(skillsHint, "Skill tool") || !strings.Contains(skillsHint, "description") {
+		t.Fatalf("skillsHint = %q", skillsHint)
+	}
+	if strings.ContainsAny(skillsHint, "\n") {
+		t.Fatal("skillsHint must be a single line")
 	}
 }

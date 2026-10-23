@@ -65,11 +65,26 @@ func (app *App) initAndWire() error {
 
 	swaggerHandler := handlers.NewSwaggerHandler(log, app.basePath)
 
+	skillsHandlerConf := handlers.SkillsHandlerConfig{
+		Log:      log,
+		Repo:     cfg.Skills.Repo,
+		Ref:      cfg.Skills.Ref,
+		BasePath: app.basePath,
+	}
+
 	// ----- Claude backend security posture -----
 	app.apiKeyAuth = middleware.APIKeyAuth(cfg.Claude.APIKeys)
 	logClaudeStartup(log, cfg, app.lookupEnv)
 
+	logSkillsStartup(log, cfg.Skills)
+	if err := app.newSkillsSyncer(); err != nil {
+		return err
+	}
+
 	claudeOpts := []claude.Option{claude.WithLogger(log)}
+	if app.skills != nil {
+		claudeOpts = append(claudeOpts, claude.WithSkills(skillsProvider(app.skills)))
+	}
 	if app.observability != nil && app.observability.Trace != nil {
 		claudeOpts = append(claudeOpts, claude.WithTracerProvider(app.observability.Trace))
 	}
@@ -104,6 +119,17 @@ func (app *App) initAndWire() error {
 		metricsHandler.RegisterRoutes(app.internalServer, promhttp.Handler())
 	}
 	swaggerHandler.RegisterRoutes(app.internalServer, loggingMiddleware)
+	// Skills status/refresh: unauthenticated like health and metrics, so the
+	// internal port must never be exposed publicly.
+	skillsHandler := skillsHandlerConf
+	if app.skills != nil {
+		skillsHandler.Source = app.skills
+	}
+	skillsHandler.NewSkillsHandler().RegisterRoutes(app.internalServer,
+		middleware.TracingMiddleware(),
+		middleware.MetricsMiddleware(httpMetrics),
+		loggingMiddleware,
+	)
 
 	// Public server: /v1 behind tracing -> metrics -> logging -> API-key auth.
 	v1Middlewares := []middleware.Middleware{

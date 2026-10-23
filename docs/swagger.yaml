@@ -76,6 +76,11 @@ definitions:
       total_tokens:
         type: integer
     type: object
+  handlers.errorResponse:
+    properties:
+      error:
+        type: string
+    type: object
   handlers.modelList:
     properties:
       data:
@@ -117,6 +122,65 @@ definitions:
       error:
         $ref: '#/definitions/handlers.openAIErrorDetailDoc'
     type: object
+  handlers.skillItem:
+    properties:
+      description:
+        type: string
+      name:
+        example: summarize
+        type: string
+      plugin:
+        example: core-skills
+        type: string
+    type: object
+  handlers.skillsRefreshResponse:
+    properties:
+      status:
+        example: triggered
+        type: string
+    type: object
+  handlers.skillsResponse:
+    properties:
+      commit:
+        type: string
+      enabled:
+        type: boolean
+      ref:
+        type: string
+      repo:
+        type: string
+      skills:
+        items:
+          $ref: '#/definitions/handlers.skillItem'
+        type: array
+      skipped:
+        items:
+          $ref: '#/definitions/handlers.skippedItem'
+        type: array
+      sync:
+        $ref: '#/definitions/handlers.skillsSyncStatus'
+      synced_at:
+        type: string
+    type: object
+  handlers.skillsSyncStatus:
+    properties:
+      consecutive_failures:
+        type: integer
+      last_attempt:
+        type: string
+      last_error:
+        type: string
+      last_success:
+        type: string
+    type: object
+  handlers.skippedItem:
+    properties:
+      path:
+        example: plugins/x/skills/bad
+        type: string
+      reason:
+        type: string
+    type: object
   model.HealthInfo:
     properties:
       status:
@@ -156,6 +220,40 @@ paths:
       summary: Get health status
       tags:
       - System
+  /api/v1/skills:
+    get:
+      description: 'Lists the skills of the current snapshot and the health of the
+        sync. Returns `{"enabled":false}` when no skills repository is configured.
+        Internal port only: unauthenticated.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.skillsResponse'
+      summary: Skills status
+      tags:
+      - Skills
+  /api/v1/skills/refresh:
+    post:
+      description: 'Asks the background syncer to sync now (non-blocking, coalesced)
+        and returns 202. Poll `GET /api/v1/skills` for the result. 404 `skills_disabled`
+        when no skills repository is configured. Internal port only: unauthenticated.'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/handlers.skillsRefreshResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Trigger a skills sync
+      tags:
+      - Skills
   /api/v1/version:
     get:
       consumes:

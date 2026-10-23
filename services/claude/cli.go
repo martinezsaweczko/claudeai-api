@@ -54,6 +54,17 @@ func WithEnv(f func() []string) Option { return func(b *CLIBackend) { b.environ 
 // files; it is not removed by Close. Default: a private temp directory.
 func WithWorkDir(dir string) Option { return func(b *CLIBackend) { b.workDir = dir } }
 
+// WithSkills enables skills when provider returns ok. It is called exactly once
+// per run, before the process starts, and the returned directory is held for
+// the whole run (a snapshot swap mid-run cannot affect it). dir must be the
+// snapshot root that contains .claude/skills; it becomes the CLI working
+// directory. When provider is nil or returns ok=false the run is identical to
+// a gateway without skills. The package deliberately does not import the
+// skills syncer: the app adapts it to this function.
+func WithSkills(provider func() (dir string, ok bool)) Option {
+	return func(b *CLIBackend) { b.skills = provider }
+}
+
 // WithTracerProvider sets the provider used for the claude.run span.
 func WithTracerProvider(tp trace.TracerProvider) Option {
 	return func(b *CLIBackend) {
@@ -84,6 +95,7 @@ type CLIBackend struct {
 	observe func(RunInfo)
 	log     *slog.Logger
 	sem     chan struct{}
+	skills  func() (string, bool)
 
 	workDir  string
 	dirOnce  sync.Once
@@ -190,12 +202,25 @@ func (b *CLIBackend) Stream(ctx context.Context, req Request, emit func(Event) e
 	runCtx, cancel := context.WithTimeout(ctx, b.cfg.Timeout)
 	defer cancel()
 
-	dir, err := b.cwd()
-	if err != nil {
-		return Result{}, fmt.Errorf("%w: preparing working directory: %v", ErrCLI, err)
+	// The skills snapshot is resolved once and held for the whole run.
+	var skillsDir string
+	var withSkills bool
+	if b.skills != nil {
+		if d, ok := b.skills(); ok && d != "" {
+			skillsDir, withSkills = d, true
+		}
+	}
+	dir := skillsDir
+	if withSkills {
+		system += "\n\n" + skillsHint
+	} else {
+		var derr error
+		if dir, derr = b.cwd(); derr != nil {
+			return Result{}, fmt.Errorf("%w: preparing working directory: %v", ErrCLI, derr)
+		}
 	}
 
-	args := append(append([]string{}, b.binArgs...), buildArgs(model, system)...)
+	args := append(append([]string{}, b.binArgs...), buildArgs(model, system, withSkills)...)
 	cmd := exec.CommandContext(runCtx, b.cfg.Bin, args...)
 	cmd.Dir = dir
 	cmd.Env = filterEnv(b.environ(), b.cfg.OAuthToken)

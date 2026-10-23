@@ -45,6 +45,11 @@ type App struct {
 
 	// claude runs chat requests (consumed by the /v1 handlers).
 	claude claude.Backend
+
+	// skills keeps the optional skills repository synced; nil when disabled.
+	skills               skillsSyncer
+	skillsStop           func() error
+	initialSkillsTimeout time.Duration // test override of initialSkillsSyncTimeout
 }
 
 func NewApp(cfg *config.Config) *App {
@@ -102,6 +107,10 @@ func (app *App) Run() error {
 		return fmt.Errorf("failed to initialize: %w", err)
 	}
 
+	// Skills: one bounded initial sync so the first requests usually have
+	// them, then the background loop. Never blocks startup for long.
+	app.startSkills()
+
 	// Start HTTP servers
 	if err := app.publicServer.Start(); err != nil {
 		return fmt.Errorf("failed to start public server: %w", err)
@@ -140,6 +149,15 @@ func (app *App) shutdown() error {
 	}
 	if err := app.internalServer.Stop(shutdownCtx); err != nil {
 		app.log.Error("Error during internal server shutdown", "error", err)
+		shutdownErr = err
+	}
+
+	if err := app.stopSkills(); err != nil {
+		app.log.Error("Error stopping skills sync", "error", err)
+		shutdownErr = err
+	}
+	if err := app.closeBackend(); err != nil {
+		app.log.Error("Error closing Claude backend", "error", err)
 		shutdownErr = err
 	}
 
