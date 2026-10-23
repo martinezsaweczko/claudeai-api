@@ -19,6 +19,7 @@ const (
 type ClaudeConfig struct {
 	Bin            string        // Claude Code CLI binary name or path
 	Model          string        // Default model alias when a request names none
+	Models         []string      // Model ids advertised by GET /v1/models (includes Model)
 	Timeout        time.Duration // Max wall time per request
 	MaxConcurrency int           // Max simultaneous CLI processes
 	OAuthToken     string        `json:"-"` // CLAUDE_CODE_OAUTH_TOKEN (secret, optional)
@@ -70,6 +71,34 @@ func (c ClaudeConfig) LogValue() slog.Value {
 		slog.Bool("oauth_token_set", c.HasOAuthToken()),
 		slog.Int("api_keys", len(c.APIKeys)),
 	)
+}
+
+// parseModels splits a comma-separated model list, trimming spaces and
+// removing duplicates (order preserved). Empty entries are an error. The default
+// model is appended when missing so it is always advertised.
+func parseModels(raw, defaultModel string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, fmt.Errorf("claude models cannot be empty")
+	}
+	var models []string
+	seen := map[string]struct{}{}
+	add := func(m string) {
+		if _, dup := seen[m]; !dup {
+			seen[m] = struct{}{}
+			models = append(models, m)
+		}
+	}
+	for _, m := range strings.Split(raw, ",") {
+		m = strings.TrimSpace(m)
+		if m == "" {
+			return nil, fmt.Errorf("claude models cannot contain empty entries")
+		}
+		add(m)
+	}
+	if d := strings.TrimSpace(defaultModel); d != "" {
+		add(d)
+	}
+	return models, nil
 }
 
 // parseAPIKeys splits a comma-separated key list, trimming spaces, dropping

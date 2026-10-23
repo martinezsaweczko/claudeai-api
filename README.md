@@ -7,7 +7,7 @@
 
 OpenAI-compatible HTTP API (`/v1/models`, `/v1/chat/completions`, including SSE streaming) backed by the Claude Code CLI. The service is stateless: the client sends the full conversation on every request and each request runs a fresh `claude` process. Personal use only.
 
-> Status: the repository currently contains the generic Go service skeleton (config, HTTP servers, middleware, observability). The OpenAI-compatible endpoints are being added.
+> Status: `GET /v1/models` and non-streaming `POST /v1/chat/completions` are implemented. SSE streaming (`stream: true`) is not available yet and is rejected with `400 streaming_not_supported`.
 
 ## Architecture
 
@@ -51,9 +51,9 @@ make check-swagger     # verify generated Swagger docs are up to date
 | `-o11-tracer-endpoint` | | OTLP gRPC endpoint (e.g. `tempo:4317`) |
 | `-o11-prometheus-path` | `/metrics` | Metrics path on the internal server |
 | `-o11-environment` | `dev` | Environment tag in telemetry |
-
 | `-claude-bin` | `claude` | Claude Code CLI binary name or path |
 | `-claude-model` | `sonnet` | Default model alias when a request names none |
+| `-claude-models` | `sonnet,opus,haiku` | Comma-separated ids advertised by `GET /v1/models` (no empty entries; duplicates removed; the default model is added if missing). Any model the CLI accepts still works in requests |
 | `-claude-timeout` | `5m` | Max wall time per request |
 | `-claude-max-concurrency` | `4` | Max simultaneous CLI processes (>= 1) |
 
@@ -77,6 +77,63 @@ curl http://127.0.0.1:46564/v1/models
 
 # auth enabled (CLAUDEAI_API_KEYS=key1,key2)
 curl -H "Authorization: Bearer key1" http://127.0.0.1:46564/v1/models
+```
+
+## API
+
+OpenAI clients use the base URL `http://<host>:<http-port>/v1` (public server). Same auth rules as above.
+
+| Endpoint | Description |
+|---|---|
+| `GET /v1/models` | `{"object":"list","data":[{"id","object":"model","created","owned_by":"anthropic"}]}`. Ids come from `-claude-models`; `created` is the process start time |
+| `GET /v1/models/{model}` | One advertised model, or 404 `model_not_found` |
+| `POST /v1/chat/completions` | Non-streaming chat completion |
+
+### Chat completions request fields
+
+- **Used**: `model` (empty uses `-claude-model`; passed to the CLI as is, so aliases and full ids work), `messages` (required), `stream` (must be `false`/absent).
+- **Messages**: roles `system` and `developer` are merged (in order, blank-line separated) into the system prompt; `user` and `assistant` form the conversation, which must end with a non-empty `user` message. `content` is a string or an array of `{"type":"text","text":...}` parts (joined with newlines).
+- **Ignored without error** (not echoed): `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, `presence_penalty`, `frequency_penalty`, `seed`, `user`, `stream_options`, `response_format`, `logit_bias`, `metadata`, and any unknown field.
+- **Rejected with 400**: `tools`/`functions`, `tool_calls`/`function_call` and `tool`/`function` roles (`unsupported_parameter`; tool calling is not supported), `n` > 1 (`unsupported_parameter`), `stream: true` (`streaming_not_supported`), content parts other than text (`unsupported_content_type`).
+- Body limit 8 MiB (`413 request_too_large`).
+
+Response: `chat.completion` with one choice. `finish_reason` is `length` when Claude stopped on `max_tokens`, otherwise `stop`. `usage.prompt_tokens` = input + cache creation + cache read tokens.
+
+### Errors
+
+All errors use the OpenAI body `{"error":{"message","type","param":null,"code"}}`. Upstream messages are fixed and sanitized; CLI output is only logged.
+
+| Status | `code` | Cause |
+|---|---|---|
+| 400 | `invalid_json`, `invalid_request_body`, `invalid_messages`, `invalid_request`, `unsupported_parameter`, `unsupported_content_type`, `streaming_not_supported` | Bad request (see above) |
+| 401 | `missing_api_key`, `invalid_api_key` | Auth enabled and key missing/wrong |
+| 404 | `model_not_found` | Model unknown to the CLI |
+| 413 | `request_too_large` | Body over 8 MiB |
+| 429 | `rate_limit_exceeded` | Claude usage limit reached |
+| 429 | `server_busy` | All `-claude-max-concurrency` slots busy (`Retry-After: 1`) |
+| 502 | `upstream_auth_error` | The Claude login is broken (your API key was fine) |
+| 502/500 | `upstream_error` | CLI failure |
+| 504 | `upstream_timeout` | Exceeded `-claude-timeout` |
+
+If the client disconnects mid-request no body is written (logged at debug, recorded as 499).
+
+```bash
+# auth disabled
+curl -s http://127.0.0.1:46564/v1/chat/completions -H 'Content-Type: application/json' \
+  -d '{"model":"haiku","messages":[{"role":"user","content":"Reply with the single word OK"}]}'
+
+# auth enabled (CLAUDEAI_API_KEYS=key1)
+curl -s http://127.0.0.1:46564/v1/chat/completions -H 'Authorization: Bearer key1' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"sonnet","messages":[{"role":"system","content":"Be brief."},{"role":"user","content":"Hi"}]}'
+```
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:46564/v1", api_key="anything")  # use a real key when auth is enabled
+r = client.chat.completions.create(model="haiku", messages=[{"role": "user", "content": "Hi"}])
+print(r.choices[0].message.content)
 ```
 
 ## API documentation

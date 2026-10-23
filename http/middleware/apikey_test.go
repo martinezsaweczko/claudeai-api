@@ -96,7 +96,7 @@ func TestWriteOpenAIError(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", rec.Code)
 	}
-	want := `{"error":{"message":"bad thing","type":"invalid_request_error","code":"bad_thing"}}`
+	want := `{"error":{"message":"bad thing","type":"invalid_request_error","param":null,"code":"bad_thing"}}`
 	if got := strings.TrimSpace(rec.Body.String()); got != want {
 		t.Errorf("body = %s, want %s", got, want)
 	}

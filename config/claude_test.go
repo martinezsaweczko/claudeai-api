@@ -171,3 +171,64 @@ func TestClaudeConfigNeverPrintsSecrets(t *testing.T) {
 		t.Errorf("non-secret fields should still be logged, got: %s", out)
 	}
 }
+
+func TestParseModels(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		def     string
+		want    []string
+		wantErr string
+	}{
+		{"defaults", "sonnet,opus,haiku", "sonnet", []string{"sonnet", "opus", "haiku"}, ""},
+		{"trims and dedupes", " opus , haiku,opus ,sonnet", "sonnet", []string{"opus", "haiku", "sonnet"}, ""},
+		{"appends missing default", "opus,haiku", "sonnet", []string{"opus", "haiku", "sonnet"}, ""},
+		{"empty entry", "opus,,haiku", "sonnet", nil, "claude models cannot contain empty entries"},
+		{"trailing comma", "opus,", "sonnet", nil, "claude models cannot contain empty entries"},
+		{"blank list", "  ", "sonnet", nil, "claude models cannot be empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseModels(tt.raw, tt.def)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("parseModels = %v, %v; want %v", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfigClaudeModels(t *testing.T) {
+	t.Run("default list", func(t *testing.T) {
+		withCommandLine(t)
+		cfg, cfgErr := LoadConfigFromEnv(fakeEnv(nil))
+		if cfgErr != nil {
+			t.Fatal(cfgErr)
+		}
+		if want := []string{"sonnet", "opus", "haiku"}; !reflect.DeepEqual(cfg.Claude.Models, want) {
+			t.Errorf("models = %v, want %v", cfg.Claude.Models, want)
+		}
+	})
+	t.Run("custom list includes the default model", func(t *testing.T) {
+		withCommandLine(t, "-claude-models", "opus", "-claude-model", "haiku")
+		cfg, cfgErr := LoadConfigFromEnv(fakeEnv(nil))
+		if cfgErr != nil {
+			t.Fatal(cfgErr)
+		}
+		if want := []string{"opus", "haiku"}; !reflect.DeepEqual(cfg.Claude.Models, want) {
+			t.Errorf("models = %v, want %v", cfg.Claude.Models, want)
+		}
+	})
+	t.Run("invalid list is a configuration error", func(t *testing.T) {
+		withCommandLine(t, "-claude-models", "opus,,haiku")
+		_, cfgErr := LoadConfigFromEnv(fakeEnv(nil))
+		if cfgErr == nil || !strings.Contains(cfgErr.Error(), "empty entries") {
+			t.Fatalf("err = %v", cfgErr)
+		}
+	})
+}

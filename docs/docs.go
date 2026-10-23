@@ -83,9 +83,346 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/v1/chat/completions": {
+            "post": {
+                "description": "OpenAI-compatible, non-streaming chat completion backed by the Claude Code CLI.\nUsed fields: model (empty uses the server default), messages (string or text-part content; roles system, developer, user, assistant), stream (must be false or absent).\nIgnored without error: temperature, top_p, max_tokens, max_completion_tokens, stop, presence_penalty, frequency_penalty, seed, user, stream_options, response_format, logit_bias, metadata.\nRejected with 400: tools/functions/tool_calls/function_call and tool or function roles (unsupported_parameter), n \u003e 1 (unsupported_parameter), stream true (streaming_not_supported), non-text content parts (unsupported_content_type).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OpenAI"
+                ],
+                "summary": "Create a chat completion",
+                "parameters": [
+                    {
+                        "description": "Chat completion request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.chatRequestDoc"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.chatCompletion"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "model_not_found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "413": {
+                        "description": "request_too_large",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "429": {
+                        "description": "rate_limit_exceeded or server_busy",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "502": {
+                        "description": "upstream_error or upstream_auth_error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "504": {
+                        "description": "upstream_timeout",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/models": {
+            "get": {
+                "description": "OpenAI-compatible model list. The ids come from the -claude-models flag; ` + "`" + `created` + "`" + ` is the process start time.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OpenAI"
+                ],
+                "summary": "List models",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.modelList"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/v1/models/{model}": {
+            "get": {
+                "description": "Returns one advertised model, or 404 ` + "`" + `model_not_found` + "`" + `.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OpenAI"
+                ],
+                "summary": "Retrieve a model",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Model id",
+                        "name": "model",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.modelObject"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.openAIErrorDoc"
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ]
+            }
         }
     },
     "definitions": {
+        "handlers.chatChoice": {
+            "type": "object",
+            "properties": {
+                "finish_reason": {
+                    "type": "string",
+                    "enum": [
+                        "stop",
+                        "length"
+                    ],
+                    "example": "stop"
+                },
+                "index": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "message": {
+                    "$ref": "#/definitions/handlers.chatReplyMessage"
+                }
+            }
+        },
+        "handlers.chatCompletion": {
+            "type": "object",
+            "properties": {
+                "choices": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.chatChoice"
+                    }
+                },
+                "created": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string",
+                    "example": "chatcmpl-0123456789abcdef01234567"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "object": {
+                    "type": "string",
+                    "example": "chat.completion"
+                },
+                "usage": {
+                    "$ref": "#/definitions/handlers.chatUsage"
+                }
+            }
+        },
+        "handlers.chatMessageDoc": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "example": "Reply with the single word OK"
+                },
+                "role": {
+                    "type": "string",
+                    "enum": [
+                        "system",
+                        "developer",
+                        "user",
+                        "assistant"
+                    ],
+                    "example": "user"
+                }
+            }
+        },
+        "handlers.chatReplyMessage": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string",
+                    "example": "assistant"
+                }
+            }
+        },
+        "handlers.chatRequestDoc": {
+            "type": "object",
+            "properties": {
+                "messages": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.chatMessageDoc"
+                    }
+                },
+                "model": {
+                    "type": "string",
+                    "example": "haiku"
+                },
+                "stream": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
+        "handlers.chatUsage": {
+            "type": "object",
+            "properties": {
+                "completion_tokens": {
+                    "type": "integer"
+                },
+                "prompt_tokens": {
+                    "type": "integer"
+                },
+                "total_tokens": {
+                    "type": "integer"
+                }
+            }
+        },
+        "handlers.modelList": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.modelObject"
+                    }
+                },
+                "object": {
+                    "type": "string",
+                    "example": "list"
+                }
+            }
+        },
+        "handlers.modelObject": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer",
+                    "example": 1700000000
+                },
+                "id": {
+                    "type": "string",
+                    "example": "sonnet"
+                },
+                "object": {
+                    "type": "string",
+                    "example": "model"
+                },
+                "owned_by": {
+                    "type": "string",
+                    "example": "anthropic"
+                }
+            }
+        },
+        "handlers.openAIErrorDetailDoc": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "param": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.openAIErrorDoc": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/handlers.openAIErrorDetailDoc"
+                }
+            }
+        },
         "model.HealthInfo": {
             "type": "object",
             "properties": {
@@ -110,6 +447,14 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        }
+    },
+    "securityDefinitions": {
+        "BearerAuth": {
+            "description": "\"Bearer \u003ckey\u003e\". Only enforced when CLAUDEAI_API_KEYS is set.",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
         }
     }
 }`

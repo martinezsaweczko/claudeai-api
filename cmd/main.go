@@ -29,6 +29,11 @@ var (
 // @description OpenAI-compatible HTTP API backed by the Claude Code CLI.
 //
 // @license.name MIT
+//
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description "Bearer <key>". Only enforced when CLAUDEAI_API_KEYS is set.
 func main() {
 	// Health check mode for container HEALTHCHECK (slim images have no curl):
 	// claudeai-api -health-check [port]

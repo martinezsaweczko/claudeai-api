@@ -75,6 +75,7 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 	// Define command-line flags for Claude backend configuration
 	var claudeBin string
 	var claudeModel string
+	var claudeModels string
 	var claudeTimeout time.Duration
 	var claudeMaxConcurrency int
 
@@ -101,6 +102,7 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 	// Claude flags (secrets come from CLAUDE_CODE_OAUTH_TOKEN and CLAUDEAI_API_KEYS, not flags)
 	flag.StringVar(&claudeBin, "claude-bin", "claude", "Claude Code CLI binary name or path")
 	flag.StringVar(&claudeModel, "claude-model", "sonnet", "Default Claude model alias when a request names none")
+	flag.StringVar(&claudeModels, "claude-models", "sonnet,opus,haiku", "Comma-separated model ids advertised by GET /v1/models (the default model is added if missing)")
 	flag.DurationVar(&claudeTimeout, "claude-timeout", 5*time.Minute, "Max wall time per request")
 	flag.IntVar(&claudeMaxConcurrency, "claude-max-concurrency", 4, "Max simultaneous Claude CLI processes")
 
@@ -153,6 +155,11 @@ func LoadConfigFromEnv(lookup func(string) (string, bool)) (*Config, *ConfigErro
 		Model:          claudeModel,
 		Timeout:        claudeTimeout,
 		MaxConcurrency: claudeMaxConcurrency,
+	}
+	if models, err := parseModels(claudeModels, claudeModel); err != nil {
+		listErrors = append(listErrors, err)
+	} else {
+		config.Claude.Models = models
 	}
 	if v, ok := lookup(envOAuthToken); ok {
 		config.Claude.OAuthToken = strings.TrimSpace(v)

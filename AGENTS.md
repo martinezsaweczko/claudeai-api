@@ -29,6 +29,8 @@ Before committing, ALL of: `go build ./...`, `go vet ./...`, `gofmt -l .` empty,
 - **Server start**: `HTTPServer.Start` binds synchronously and returns bind errors; serve errors after binding are logged.
 - **Claude backend**: `services/claude` defines `Backend` (`Stream`/`Complete`) and `CLIBackend`, which spawns one isolated `claude -p` per request (prompt on stdin, own process group killed on timeout, `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` stripped, isolation flags in `buildArgs`). Spike findings and event shapes are in the package doc. Tests use a re-exec fake CLI; the real-CLI test needs `CLAUDEAI_INTEGRATION=1`. `initAndWire` keeps it on `app.claude`.
 
+- **OpenAI API**: `http/handlers/chat.go` (`POST /v1/chat/completions`, non-streaming until T5) and `models.go` (`GET /v1/models[/{model}]`) depend on the consumer interface `handlers.ChatBackend` and are mounted on the public server in `initAndWire` behind tracing -> metrics -> logging -> `app.apiKeyAuth`. Backend errors map to OpenAI errors in `ChatHandler.fail` (fixed messages, never raw CLI output; client cancel writes no body, status 499). Request fields: used `model`/`messages`/`stream`; tools, `n` > 1, `stream: true` and non-text parts are 400; sampling fields are ignored. Advertised models come from `-claude-models`. Register routes with method patterns (`GET /v1/models`) because metric route labels come from `r.Pattern`.
+
 ## Observability (mandatory for new code)
 
 - **Metrics**: instruments created once via `o11/metrics.go` factories or `o11.NewBusinessCounter` (name pattern: `<area>_<noun>_<verb>_total`). HTTP metrics via `middleware.MetricsMiddleware`. Meter names are `claudeai-api/{http,repository,service}`.

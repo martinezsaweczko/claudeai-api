@@ -39,11 +39,11 @@ type App struct {
 	basePath       string
 	lookupEnv      func(string) (string, bool)
 
-	// apiKeyAuth guards the /v1 routes (attached when they are added). It is a
+	// apiKeyAuth guards the /v1 routes. It is a
 	// pass-through when no API keys are configured.
 	apiKeyAuth middleware.Middleware
 
-	// claude runs chat requests (consumed by the /v1 handlers added later).
+	// claude runs chat requests (consumed by the /v1 handlers).
 	claude claude.Backend
 }
 
