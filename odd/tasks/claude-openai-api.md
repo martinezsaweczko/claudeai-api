@@ -31,7 +31,7 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - [x] T6b.2 Integrate: backend flags/cwd per run, app lifecycle (Run loop + shutdown), internal status/refresh endpoints, system-prompt hint, docs, e2e smoke with the real private repo
 - [x] T7.1 Metrics instruments + trace enrichment + metric catalog docs (done, see below)
 - [x] T7.2 Grafana dashboard rows for Claude runs, tokens/cost, skills; example alert rules; test that every PromQL metric name exists in the real exposition
-- [ ] T8 Containerfile with `claude` binary, CI cleanup, README
+- [x] T8 Containerfile with `claude` binary, CI cleanup, README
 
 ## Acceptance
 `go build ./... && go vet ./... && gofmt -l . && go test -race ./...` clean after each task.
@@ -131,6 +131,20 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - Verified by parent: build, vet, gofmt, test -race, mod tidy clean; dashboard.json valid JSON (39 panel objects); no leftover processes.
 - NOT verified: visual rendering in Grafana (none available), alert rules with promtool (not installed), PromQL semantics beyond name/label checks.
 - Native review: medium, single reliability lens -> APPROVED, acknowledged (lineage review-fd130340b86d7180). 3 advisory warnings NOT acted on: (1) alerts using `increase()` over lazily-created counters (ClaudeAuthErrors, ClaudeRateLimited, ClaudeBusyRejections) miss the FIRST occurrence because the series does not exist until the first Add - fix by pre-creating series at 0 for the bounded outcome set (and configured models) or by using `absent`/`or vector(0)` patterns; (2) the test validates label NAMES but not label VALUES (a misspelled outcome value would silently disable an alert); (3) grouping labels are checked against the union of all selectors in an expression, not the aggregated one.
+
+### T8 — done
+- Route: delegated direct (one writer). Trigger: container + CI + Makefile + secure defaults + README rewrite, 13 files.
+- Commit: da9f326 `feat: add production container, secure bind defaults and full README` (+532/-144).
+- Container: 3-stage Containerfile. Claude CLI pinned (`ARG CLAUDE_VERSION=2.1.309`) from the official release binary, no Node; build verifies the signing-key fingerprint (31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE), the GPG signature of manifest.json and the binary sha256 against the signed manifest (Linux binaries carry no per-binary signature). Runtime: debian bookworm-slim + git + openssh-client, non-root uid 1001, HOME=/home/appuser, state /var/lib/claudeai-api, no secrets baked in, `DISABLE_UPDATES=1` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`. Fixed old bugs: invalid exec-form HEALTHCHECK, golang image tag older than go.mod (now golang:1.27.2-bookworm; bump together with go.mod). podman needs `--format docker` to keep HEALTHCHECK (`make container` does). `compose.example.yaml` + `.containerignore`/`.dockerignore`.
+- Secure defaults (RED observed): `-http-address` and `-internal-address` now default to 127.0.0.1; the container CMD passes 0.0.0.0 for both; internal port never published.
+- CI/Makefile: swagger check uses the go.mod-pinned swag via `go run` + gofmt'd docs.go (first `make check-swagger` run failed on tooling drift, now exits 0); removed `swag@latest` installs; `go mod tidy -diff`; container build step passes build args + smoke step (CI edits NOT run locally). Left unpinned: `govulncheck@latest`, action major tags. `.go-version` (1.27.0) is stale vs go.mod (1.27.2), unused.
+- Verified by parent: build, vet, gofmt, test -race, mod tidy, `make check-swagger` all clean; podman leftovers none. Writer's podman run (rootless 5.4.2): image 512 MB; `GET /v1/models` 200 from the host; skills synced from the private repo via the mounted deploy key (commit 41e630a, `summarize`); health `healthy`; `POST /v1/chat/completions` -> 502 `upstream_auth_error` without leaking CLI text (no token in the container); uid 1001; `--read-only` works with tmpfs /tmp and /home/appuser and a named state volume. Tests pass with `claude` removed from PATH.
+- Native review: high risk, consent granted, 4 lenses -> APPROVED, no corrections, acknowledged (lineage review-cfb3bb220a6129b2); risk lens found nothing. 10 advisory findings NOT acted on: curl in claude-fetch has no --retry/timeout (Containerfile:37-42), non-container upgrade silently changes bind to loopback (config.go:88), Makefile check-swagger one-liner gives a misleading error, duplicate .dockerignore/.containerignore, ci.yml:91-95 smoke step, Containerfile:43, etc.
+- NOT verified: docker route (only podman), a real Claude call from inside the container (needs the owner's `claude setup-token` token), CI workflow edits, compose with podman-compose.
+
+## Project status: ALL TASKS DONE (T1-T8). Branch feat/claude-openai-api, nothing pushed, no PR.
+- Cleanup backlog (advisory review findings, none blocking): see T2, T4, T5, T6b.1, T6b.2, T7.1, T7.2, T8 sections. Highest value: T7.1 model-label allow-list; T7.2 pre-seed counters so first-occurrence alerts fire; T8 curl retry; T6b.1 scp `host:path` URLs without a user.
+- Owner to-do: run `claude setup-token`, put the token in a git-ignored `.env` (mode 600); decide on pushing the branch / opening a PR (remote of THIS repo not created yet).
 
 - Carry-forward: T4/T5 error mapping ErrAuth->401/500, ErrRateLimited->429, ErrBusy->429/503, ErrTimeout->504, ErrInvalidModel->404 model_not_found, ErrInvalidRequest->400, ErrCLI/ErrNotFound->502/500; after SSE starts, errors go as a final SSE error event. T6b must revisit `--tools ""` and `--disable-slash-commands` (they disable skills) alongside `--plugin-dir`, while keeping `--setting-sources ""`. T8 container needs `claude` binary, CLAUDE_CODE_OAUTH_TOKEN secret, writable temp dir.
 
