@@ -28,7 +28,7 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - [x] T5 SSE streaming chunks
 - [x] T6a Create skills repo (plugin marketplace layout, example skill, README) locally
 - [x] T6b.1 Skills spike + `services/skills` syncer package + `-skills-*` flags (done, see below)
-- [ ] T6b.2 Integrate: backend flags/cwd per run, app lifecycle (Run loop + shutdown), internal status/refresh endpoints, system-prompt hint, docs, e2e smoke with the real private repo
+- [x] T6b.2 Integrate: backend flags/cwd per run, app lifecycle (Run loop + shutdown), internal status/refresh endpoints, system-prompt hint, docs, e2e smoke with the real private repo
 - [ ] T7 Metrics + traces (requests, latency, TTFT, tokens, cost, process errors, skills version; spans; Grafana)
 - [ ] T8 Containerfile with `claude` binary, CI cleanup, README
 
@@ -99,6 +99,17 @@ Allowed: everything in this repository. Not allowed without asking: creating rem
 - Verified by parent: build, vet, gofmt, test -race, mod tidy clean; no leftover processes; no key material in the repo; skills repo untouched. Real private repo sync (CLAUDEAI_SKILLS_E2E=1) passed: commit 41e630a, skill `summarize`. Real `claude -p` call showed Skill tool_use for `summarize`.
 - Native review: high risk, consent granted, 4 lenses -> APPROVED, no corrections, acknowledged (lineage review-faf722455dc30190). ~12+ advisory findings, mostly readability; notable: R1 `scp-ssh-key-ignored` (git.go:28-31) = an scp URL WITHOUT a user (`host:path`) is not treated as ssh so the key would not be applied; our `git@host:path` form is fine. Not acted on.
 - Open/unverified: duplicate-name vs frontmatter-name precedence untested in the CLI; ancestors of cwd may be read under `--setting-sources project` (keep `-skills-dir` in a dedicated dir with no CLAUDE.md/settings above it); Windows process-group path untested.
+
+### T6b.2 — done
+- Route: delegated direct (one writer). Trigger: cross-cutting wiring (claude backend, app lifecycle, handlers, docs), 21 files.
+- Commit: 6aa8e6b `feat: load synced skills into Claude runs and expose skills status` (+1693/-23).
+- Backend: `claude.WithSkills(func() (dir, ok))`, called once per run after the concurrency slot is acquired; with skills: `--tools Skill --setting-sources project`, no `--disable-slash-commands`, cwd = snapshot dir; otherwise flags exactly as before. System prompt gets a fixed skills hint. Parser ignores tool_use/input_json_delta/tool_result and joins text of several assistant turns with a blank line; `Result.Text` is now the accumulated text of all turns when deltas arrived, so Stream == Complete. Real fixture `testdata/skill_invocation.stream.jsonl`.
+- App: `skills.New` failure = startup error (key path not leaked); bounded 20s initial Sync (WARN on failure) then `Syncer.Run` goroutine, cancelled and awaited (5s) on shutdown; backend `Close()` now called at shutdown (closes the T3 carry-over). Internal endpoints (unauthenticated like health/metrics, port must stay internal): `GET /api/v1/skills`, `POST /api/v1/skills/refresh` (202, 404 `skills_disabled`).
+- RED: only partially observed (parser turn separation test); cli/render/handler code was written before some tests (writer's disclosure).
+- Verified by parent: build, vet, gofmt, test -race, mod tidy clean; no leftover processes; skills repo clean; no key material. Removed two empty stale `/tmp/claudeai-api-cwd-*` dirs left by pre-Close runs.
+- Real smoke (3 of 4 budgeted haiku calls): real private repo synced via deploy key (commit 41e630a, skill summarize); refresh endpoint 202; non-streaming chat used the skill first try (prompt_tokens 10223 because usage sums every turn); streaming OK (first delta +3.2s because of the tool-call turn, no tool JSON in deltas); update pickup proven against a LOCAL file:// repo (alpha -> alpha+beta after POST refresh, no restart), nothing pushed to the real remote.
+- Native review: medium risk, consent granted, single reliability lens -> APPROVED and acknowledged (lineage review-89c7ad7e4f095a9a). 3 advisory findings: README:192 contradicting sentence (FIXED in the docs commit after this one); app/skills_test.go:53 fake syncer blocks forever in an ignoreCtx path (test goroutine leak) and app/app.go:50-52 test-only `initialSkillsTimeout` field in production struct - not acted on.
+- Open/unverified: `make check-swagger` not run; no test builds the real CLIBackend through initAndWire with a fake syncer; `\n\n` turn separator seen only in unit tests; stuck-loop shutdown test takes ~5s (skipped with -short).
 
 - Carry-forward: T4/T5 error mapping ErrAuth->401/500, ErrRateLimited->429, ErrBusy->429/503, ErrTimeout->504, ErrInvalidModel->404 model_not_found, ErrInvalidRequest->400, ErrCLI/ErrNotFound->502/500; after SSE starts, errors go as a final SSE error event. T6b must revisit `--tools ""` and `--disable-slash-commands` (they disable skills) alongside `--plugin-dir`, while keeping `--setting-sources ""`. T8 container needs `claude` binary, CLAUDE_CODE_OAUTH_TOKEN secret, writable temp dir.
 
