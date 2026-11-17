@@ -1,6 +1,6 @@
 module github.com/martinezsaweczko/claudeai-api
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/gofrs/uuid v4.4.0+incompatible
